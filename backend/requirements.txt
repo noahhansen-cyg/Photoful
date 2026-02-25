@@ -1,0 +1,6 @@
+flask
+flask-socketio
+flask-cors
+gevent
+gevent-websocket
+pillow
