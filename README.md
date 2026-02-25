@@ -36,12 +36,37 @@ quiplash_but_fun_and_pictures-/
 
 - Python 3.10+
 - Node.js 20+
+- `make`
 
 ---
 
-## Running Locally
+## Quick Start
 
-### 1. Start the backend
+```bash
+make install   # install all dependencies (run once after cloning)
+make dev       # start backend + frontend together
+```
+
+`Ctrl+C` stops both servers. If a port gets stuck: `make stop`.
+
+---
+
+## All Make Commands
+
+| Command | Description |
+|---|---|
+| `make dev` | Start backend (:5000) and frontend (:5173) together |
+| `make stop` | Force-kill anything on ports 5000 and 5173 |
+| `make install` | Install Python + Node dependencies in one shot |
+| `make test` | Run all tests (backend + frontend) |
+| `make test-backend` | Run backend pytest suite only |
+| `make test-frontend` | Run frontend vitest suite only |
+
+---
+
+## Running Manually
+
+### Backend
 
 ```bash
 cd backend
@@ -51,9 +76,7 @@ python app.py
 
 The server runs on `http://localhost:5000`.
 
-### 2. Start the frontend
-
-In a separate terminal:
+### Frontend
 
 ```bash
 cd frontend
