@@ -153,40 +153,23 @@ describe("TV game:state event", () => {
 });
 
 // ---------------------------------------------------------------------------
-// player:joined event
+// game:state — player list changes (TV no longer uses player:joined/left;
+// all updates arrive via game:state broadcasts)
 // ---------------------------------------------------------------------------
 
-describe("TV player:joined event", () => {
-  it("adds a new player when player:joined fires", () => {
+describe("TV player list via game:state", () => {
+  it("shows a player when game:state includes them", () => {
     renderTV();
     act(() => {
-      emit("player:joined", {
-        player: { id: "1", name: "Alice", role: "player", avatar_color: "#FF6B6B" },
+      emit("game:state", {
+        state: "lobby",
+        players: [{ id: "1", name: "Alice", role: "player", avatar_color: "#FF6B6B" }],
       });
     });
     expect(screen.getByText("Alice")).toBeInTheDocument();
   });
 
-  it("does not duplicate a player who joins twice", () => {
-    renderTV();
-    act(() => {
-      emit("player:joined", {
-        player: { id: "1", name: "Alice", role: "player", avatar_color: "#FF6B6B" },
-      });
-      emit("player:joined", {
-        player: { id: "1", name: "Alice", role: "player", avatar_color: "#FF6B6B" },
-      });
-    });
-    expect(screen.getAllByText("Alice")).toHaveLength(1);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// player:left event
-// ---------------------------------------------------------------------------
-
-describe("TV player:left event", () => {
-  it("removes a player when player:left fires", () => {
+  it("removes a player when subsequent game:state omits them", () => {
     renderTV();
     act(() => {
       emit("game:state", {
@@ -195,12 +178,20 @@ describe("TV player:left event", () => {
       });
     });
     act(() => {
-      emit("player:left", { player_id: "1" });
+      emit("game:state", { state: "lobby", players: [] });
     });
     expect(screen.queryByText("Alice")).not.toBeInTheDocument();
   });
 
-  it("shows waiting message again when all players leave", () => {
+  it("shows waiting message when game:state has no players", () => {
+    renderTV();
+    act(() => {
+      emit("game:state", { state: "lobby", players: [] });
+    });
+    expect(screen.getByText(/waiting for players/i)).toBeInTheDocument();
+  });
+
+  it("shows waiting message after players leave via game:state update", () => {
     renderTV();
     act(() => {
       emit("game:state", {
@@ -209,7 +200,7 @@ describe("TV player:left event", () => {
       });
     });
     act(() => {
-      emit("player:left", { player_id: "1" });
+      emit("game:state", { state: "lobby", players: [] });
     });
     expect(screen.getByText(/waiting for players/i)).toBeInTheDocument();
   });

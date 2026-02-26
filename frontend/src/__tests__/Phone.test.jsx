@@ -150,28 +150,27 @@ describe("Phone lobby player list", () => {
     expect(screen.getByText(/Bob/)).toBeInTheDocument();
   });
 
-  it("highlights the current player's own name", async () => {
+  it("displays the current player's own name in the header badge", async () => {
+    await joinAs("Alice");
+    // Name badge is always visible once joined
+    expect(screen.getByText(/Alice/)).toBeInTheDocument();
+  });
+
+  it("shows a new player when game:state includes them", async () => {
     await joinAs("Alice");
     act(() => {
       emit("game:state", {
         state: "lobby",
-        players: [{ id: "1", name: "Alice", role: "player", avatar_color: "#FF6B6B" }],
-      });
-    });
-    expect(screen.getByText(/alice.*you/i)).toBeInTheDocument();
-  });
-
-  it("adds a player when player:joined fires", async () => {
-    await joinAs("Alice");
-    act(() => {
-      emit("player:joined", {
-        player: { id: "2", name: "Bob", role: "player", avatar_color: "#4ECDC4" },
+        players: [
+          { id: "1", name: "Alice", role: "player", avatar_color: "#FF6B6B" },
+          { id: "2", name: "Bob", role: "player", avatar_color: "#4ECDC4" },
+        ],
       });
     });
     expect(screen.getByText(/Bob/)).toBeInTheDocument();
   });
 
-  it("removes a player when player:left fires", async () => {
+  it("removes a player when subsequent game:state omits them", async () => {
     await joinAs("Alice");
     act(() => {
       emit("game:state", {
@@ -183,7 +182,10 @@ describe("Phone lobby player list", () => {
       });
     });
     act(() => {
-      emit("player:left", { player_id: "2" });
+      emit("game:state", {
+        state: "lobby",
+        players: [{ id: "1", name: "Alice", role: "player", avatar_color: "#FF6B6B" }],
+      });
     });
     expect(screen.queryByText(/Bob/)).not.toBeInTheDocument();
   });

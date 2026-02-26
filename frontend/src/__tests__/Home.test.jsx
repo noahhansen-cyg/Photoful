@@ -119,7 +119,7 @@ describe("Join Room", () => {
     await userEvent.click(screen.getByRole("button", { name: /join as player/i }));
 
     await waitFor(() => {
-      expect(mockNavigate).toHaveBeenCalledWith("/room/ABCD/phone");
+      expect(mockNavigate).toHaveBeenCalledWith("/room/ABCD/phone", { state: { role: "player" } });
     });
   });
 
