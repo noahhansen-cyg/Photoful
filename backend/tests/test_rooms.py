@@ -78,8 +78,8 @@ def test_add_player_returns_true_on_success():
     assert room_store.add_player(room["code"], _make_player()) is True
 
 
-def test_add_player_returns_false_for_unknown_room():
-    assert room_store.add_player("XXXX", _make_player()) is False
+def test_add_player_returns_none_for_unknown_room():
+    assert room_store.add_player("XXXX", _make_player()) is None
 
 
 def test_add_player_stores_player_in_room():
@@ -191,3 +191,188 @@ def test_get_room_state_empty_when_all_disconnected():
     room_store.remove_player("s1")
     state = room_store.get_room_state(room["code"])
     assert state["players"] == []
+
+
+def test_get_room_state_includes_sprint2_fields():
+    room = room_store.create_room()
+    state = room_store.get_room_state(room["code"])
+    assert "current_prompt" in state
+    assert "timer_end" in state
+    assert "prompt_number" in state
+    assert "total_prompts" in state
+
+
+def test_get_room_state_current_prompt_none_in_lobby():
+    room = room_store.create_room()
+    state = room_store.get_room_state(room["code"])
+    assert state["current_prompt"] is None
+
+
+def test_get_room_state_total_prompts_zero_in_lobby():
+    room = room_store.create_room()
+    state = room_store.get_room_state(room["code"])
+    assert state["total_prompts"] == 0
+
+
+# ---------------------------------------------------------------------------
+# add_submission
+# ---------------------------------------------------------------------------
+
+def _make_prompt(player_ids=None):
+    return {
+        "prompt_id":   "pid-1",
+        "prompt_text": "Test prompt",
+        "player_ids":  player_ids or ["p1", "p2"],
+        "submissions": {},
+        "votes":       {},
+    }
+
+
+def _room_in_submitting():
+    """Return a room in 'submitting' state with one prompt and two players."""
+    room = room_store.create_room()
+    code = room["code"]
+    room_store.add_player(code, _make_player(id="p1", socket_id="s1", name="Alice"))
+    room_store.add_player(code, _make_player(id="p2", socket_id="s2", name="Bob"))
+    rooms[code]["state"] = "submitting"
+    rooms[code]["prompts"] = [_make_prompt(["p1", "p2"])]
+    rooms[code]["current_prompt_idx"] = 0
+    return code
+
+
+def test_add_submission_returns_true_on_success():
+    code = _room_in_submitting()
+    assert room_store.add_submission(code, "pid-1", "p1", "/img.jpg") is True
+
+
+def test_add_submission_stores_image_url_and_caption():
+    code = _room_in_submitting()
+    room_store.add_submission(code, "pid-1", "p1", "/img.jpg", caption="Nice photo")
+    sub = rooms[code]["prompts"][0]["submissions"]["p1"]
+    assert sub["image_url"] == "/img.jpg"
+    assert sub["caption"] == "Nice photo"
+
+
+def test_add_submission_caption_defaults_to_none():
+    code = _room_in_submitting()
+    room_store.add_submission(code, "pid-1", "p1", "/img.jpg")
+    sub = rooms[code]["prompts"][0]["submissions"]["p1"]
+    assert sub["caption"] is None
+
+
+def test_add_submission_returns_false_for_unknown_room():
+    assert room_store.add_submission("XXXX", "pid-1", "p1", "/img.jpg") is False
+
+
+def test_add_submission_returns_false_when_not_submitting():
+    code = _room_in_submitting()
+    rooms[code]["state"] = "voting"
+    assert room_store.add_submission(code, "pid-1", "p1", "/img.jpg") is False
+
+
+def test_add_submission_returns_false_for_unknown_prompt():
+    code = _room_in_submitting()
+    assert room_store.add_submission(code, "bad-prompt-id", "p1", "/img.jpg") is False
+
+
+def test_add_submission_returns_false_for_non_assigned_player():
+    code = _room_in_submitting()
+    assert room_store.add_submission(code, "pid-1", "p3-not-assigned", "/img.jpg") is False
+
+
+def test_add_submission_both_players_can_submit():
+    code = _room_in_submitting()
+    assert room_store.add_submission(code, "pid-1", "p1", "/img1.jpg") is True
+    assert room_store.add_submission(code, "pid-1", "p2", "/img2.jpg") is True
+    assert len(rooms[code]["prompts"][0]["submissions"]) == 2
+
+
+# ---------------------------------------------------------------------------
+# add_vote
+# ---------------------------------------------------------------------------
+
+def _room_in_voting():
+    """Return a room in 'voting' state with one prompt (no submissions needed)."""
+    code = _room_in_submitting()
+    rooms[code]["state"] = "voting"
+    return code
+
+
+def test_add_vote_returns_true_on_success():
+    code = _room_in_voting()
+    # p1 and p2 are competing; add p3 as voter
+    room_store.add_player(code, _make_player(id="p3", socket_id="s3", name="Carol"))
+    assert room_store.add_vote(code, "pid-1", "p3", "p1") is True
+
+
+def test_add_vote_stores_vote():
+    code = _room_in_voting()
+    room_store.add_player(code, _make_player(id="p3", socket_id="s3", name="Carol"))
+    room_store.add_vote(code, "pid-1", "p3", "p1")
+    assert rooms[code]["prompts"][0]["votes"]["p3"] == "p1"
+
+
+def test_add_vote_returns_false_for_unknown_room():
+    assert room_store.add_vote("XXXX", "pid-1", "p3", "p1") is False
+
+
+def test_add_vote_returns_false_when_not_voting():
+    code = _room_in_voting()
+    rooms[code]["state"] = "scores"
+    assert room_store.add_vote(code, "pid-1", "p3", "p1") is False
+
+
+def test_add_vote_returns_false_for_unknown_prompt():
+    code = _room_in_voting()
+    assert room_store.add_vote(code, "bad-id", "p3", "p1") is False
+
+
+def test_add_vote_returns_false_when_competing_player_votes():
+    code = _room_in_voting()
+    # p1 is assigned to this prompt — can't vote on it
+    assert room_store.add_vote(code, "pid-1", "p1", "p2") is False
+
+
+def test_add_vote_returns_false_on_double_vote():
+    code = _room_in_voting()
+    room_store.add_player(code, _make_player(id="p3", socket_id="s3", name="Carol"))
+    room_store.add_vote(code, "pid-1", "p3", "p1")
+    assert room_store.add_vote(code, "pid-1", "p3", "p2") is False
+
+
+def test_add_vote_returns_false_for_invalid_voted_for():
+    code = _room_in_voting()
+    room_store.add_player(code, _make_player(id="p3", socket_id="s3", name="Carol"))
+    assert room_store.add_vote(code, "pid-1", "p3", "p99-does-not-exist") is False
+
+
+# ---------------------------------------------------------------------------
+# get_current_prompt
+# ---------------------------------------------------------------------------
+
+def test_get_current_prompt_returns_none_for_unknown_room():
+    assert room_store.get_current_prompt("XXXX") is None
+
+
+def test_get_current_prompt_returns_none_when_no_prompts():
+    room = room_store.create_room()
+    assert room_store.get_current_prompt(room["code"]) is None
+
+
+def test_get_current_prompt_returns_first_prompt():
+    code = _room_in_submitting()
+    prompt = room_store.get_current_prompt(code)
+    assert prompt is not None
+    assert prompt["prompt_id"] == "pid-1"
+
+
+def test_get_current_prompt_respects_current_prompt_idx():
+    room = room_store.create_room()
+    code = room["code"]
+    rooms[code]["prompts"] = [
+        _make_prompt(["p1", "p2"]),
+        {**_make_prompt(["p1", "p2"]), "prompt_id": "pid-2", "prompt_text": "Second"},
+    ]
+    rooms[code]["current_prompt_idx"] = 1
+    prompt = room_store.get_current_prompt(code)
+    assert prompt["prompt_id"] == "pid-2"

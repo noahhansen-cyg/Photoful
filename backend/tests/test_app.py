@@ -1,9 +1,11 @@
 import pytest
 import sys
 import os
+import io
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
+from PIL import Image as PILImage
 from app import app
 from rooms import rooms
 
@@ -80,3 +82,90 @@ def test_check_room_is_case_insensitive(client):
 def test_check_room_returns_200(client):
     response = client.get("/api/rooms/ZZZZ")
     assert response.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# POST /api/rooms/<code>/upload
+# ---------------------------------------------------------------------------
+
+def _jpeg_bytes():
+    """Return a minimal in-memory JPEG as BytesIO."""
+    img = PILImage.new("RGB", (100, 100), color=(255, 0, 0))
+    buf = io.BytesIO()
+    img.save(buf, "JPEG")
+    buf.seek(0)
+    return buf
+
+
+def _room_in_submitting(client):
+    """Create a room and force its state to 'submitting'; return the code."""
+    code = client.post("/api/rooms").get_json()["room_code"]
+    rooms[code]["state"] = "submitting"
+    return code
+
+
+def test_upload_returns_201_with_image_url(client):
+    code = _room_in_submitting(client)
+    data = {"photo": (io.BytesIO(_jpeg_bytes().read()), "photo.jpg")}
+    response = client.post(
+        f"/api/rooms/{code}/upload",
+        data=data,
+        content_type="multipart/form-data",
+    )
+    assert response.status_code == 201
+    assert "image_url" in response.get_json()
+
+
+def test_upload_image_url_contains_room_code(client):
+    code = _room_in_submitting(client)
+    buf = _jpeg_bytes()
+    response = client.post(
+        f"/api/rooms/{code}/upload",
+        data={"photo": (buf, "photo.jpg")},
+        content_type="multipart/form-data",
+    )
+    url = response.get_json()["image_url"]
+    assert code in url
+
+
+def test_upload_returns_404_for_unknown_room(client):
+    buf = _jpeg_bytes()
+    response = client.post(
+        "/api/rooms/ZZZZ/upload",
+        data={"photo": (buf, "photo.jpg")},
+        content_type="multipart/form-data",
+    )
+    assert response.status_code == 404
+
+
+def test_upload_returns_400_when_not_submitting(client):
+    code = client.post("/api/rooms").get_json()["room_code"]
+    # state remains "lobby"
+    buf = _jpeg_bytes()
+    response = client.post(
+        f"/api/rooms/{code}/upload",
+        data={"photo": (buf, "photo.jpg")},
+        content_type="multipart/form-data",
+    )
+    assert response.status_code == 400
+
+
+def test_upload_returns_400_when_no_photo_field(client):
+    code = _room_in_submitting(client)
+    response = client.post(
+        f"/api/rooms/{code}/upload",
+        data={},
+        content_type="multipart/form-data",
+    )
+    assert response.status_code == 400
+
+
+def test_upload_is_case_insensitive_for_room_code(client):
+    code = _room_in_submitting(client)
+    buf = _jpeg_bytes()
+    response = client.post(
+        f"/api/rooms/{code.lower()}/upload",
+        data={"photo": (buf, "photo.jpg")},
+        content_type="multipart/form-data",
+    )
+    assert response.status_code == 201
