@@ -3,15 +3,16 @@ import { useNavigate } from "react-router-dom";
 
 export default function Home() {
   const [joinCode, setJoinCode] = useState("");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [role, setRole]         = useState("player"); // "player" | "host"
+  const [error, setError]       = useState("");
+  const [loading, setLoading]   = useState(false);
   const navigate = useNavigate();
 
   async function createRoom() {
     setLoading(true);
     setError("");
     try {
-      const res = await fetch("/api/rooms", { method: "POST" });
+      const res  = await fetch("/api/rooms", { method: "POST" });
       const data = await res.json();
       navigate(`/room/${data.room_code}/tv`);
     } catch {
@@ -28,13 +29,13 @@ export default function Home() {
     setError("");
     setLoading(true);
     try {
-      const res = await fetch(`/api/rooms/${code}`);
+      const res  = await fetch(`/api/rooms/${code}`);
       const data = await res.json();
       if (!data.exists) {
         setError(`Room "${code}" not found.`);
         return;
       }
-      navigate(`/room/${code}/phone`);
+      navigate(`/room/${code}/phone`, { state: { role } });
     } catch {
       setError("Failed to check room. Is the server running?");
     } finally {
@@ -62,8 +63,29 @@ export default function Home() {
           onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
           maxLength={4}
         />
+
+        {/* Role toggle — shown once a code is entered */}
+        {joinCode.length > 0 && (
+          <div style={styles.roleToggle}>
+            <button
+              type="button"
+              style={role === "player" ? styles.roleActive : styles.roleInactive}
+              onClick={() => setRole("player")}
+            >
+              Player
+            </button>
+            <button
+              type="button"
+              style={role === "host" ? styles.roleActive : styles.roleInactive}
+              onClick={() => setRole("host")}
+            >
+              Host
+            </button>
+          </div>
+        )}
+
         <button style={styles.secondaryBtn} type="submit" disabled={loading}>
-          {loading ? "Joining..." : "Join as Player"}
+          {loading ? "Joining..." : role === "host" ? "Join as Host" : "Join as Player"}
         </button>
       </form>
 
@@ -85,7 +107,7 @@ const styles = {
     color: "#fff",
     fontFamily: "sans-serif",
   },
-  title: { fontSize: "3rem", margin: 0 },
+  title:    { fontSize: "3rem", margin: 0 },
   subtitle: { fontSize: "1.2rem", color: "#aaa", margin: 0 },
   primaryBtn: {
     padding: "1rem 2.5rem",
@@ -97,8 +119,8 @@ const styles = {
     cursor: "pointer",
     fontWeight: "bold",
   },
-  divider: { color: "#666", fontSize: "0.9rem" },
-  joinForm: { display: "flex", gap: "0.5rem", flexWrap: "wrap", justifyContent: "center" },
+  divider:  { color: "#666", fontSize: "0.9rem" },
+  joinForm: { display: "flex", gap: "0.5rem", flexWrap: "wrap", justifyContent: "center", alignItems: "center" },
   input: {
     padding: "0.75rem 1rem",
     fontSize: "1.2rem",
@@ -109,6 +131,24 @@ const styles = {
     textAlign: "center",
     letterSpacing: "0.2em",
     width: "140px",
+  },
+  roleToggle: { display: "flex", borderRadius: "8px", overflow: "hidden", border: "2px solid #6c63ff" },
+  roleActive: {
+    padding: "0.6rem 1.1rem",
+    fontSize: "0.95rem",
+    background: "#6c63ff",
+    color: "#fff",
+    border: "none",
+    cursor: "pointer",
+    fontWeight: "bold",
+  },
+  roleInactive: {
+    padding: "0.6rem 1.1rem",
+    fontSize: "0.95rem",
+    background: "transparent",
+    color: "#aaa",
+    border: "none",
+    cursor: "pointer",
   },
   secondaryBtn: {
     padding: "0.75rem 1.5rem",
