@@ -42,7 +42,7 @@ The core challenge is real-time state sync between many phones and one TV. Every
 - Fast to prototype, easy to read and maintain
 - Straightforward to deploy anywhere
 
-**Recommended:** **Flask** + **Flask-SocketIO** with **eventlet** or **gevent** for async WebSocket handling
+**Implemented:** **Flask** + **Flask-SocketIO** with **gevent** for async WebSocket handling (eventlet deprecated)
 
 ### Real-time Layer
 **Flask-SocketIO** — wraps socket.io conventions (rooms, namespaces, reconnection) in idiomatic Python. Events look like this:
