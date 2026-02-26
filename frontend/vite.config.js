@@ -12,6 +12,7 @@ export default defineConfig({
     host: true, // bind to 0.0.0.0 so phones on the same WiFi can connect
     proxy: {
       "/api": "http://localhost:5000",
+      "/uploads": "http://localhost:5000",
       "/socket.io": {
         target: "http://localhost:5000",
         ws: true,
