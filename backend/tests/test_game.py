@@ -164,15 +164,26 @@ def test_all_voted_multiple_eligible_partial():
     assert game.all_voted(prompt, connected) is False
 
 
-def test_all_voted_host_role_excluded_from_eligible():
-    """Host is not counted as an eligible voter (role != 'player')."""
+def test_all_voted_host_counts_as_eligible_voter():
+    """Host is an eligible voter when not competing."""
     prompt = {"player_ids": ["p1", "p2"], "votes": {}}
     connected = [
         _connected("p1", "A"),
         _connected("p2", "B"),
         _connected("ph", "Host", role="host"),
     ]
-    # No player-role non-competing → all voted
+    # Host hasn't voted yet → not all voted
+    assert game.all_voted(prompt, connected) is False
+
+
+def test_all_voted_host_vote_satisfies_eligibility():
+    """all_voted is True once the host has voted."""
+    prompt = {"player_ids": ["p1", "p2"], "votes": {"ph": "p1"}}
+    connected = [
+        _connected("p1", "A"),
+        _connected("p2", "B"),
+        _connected("ph", "Host", role="host"),
+    ]
     assert game.all_voted(prompt, connected) is True
 
 
@@ -439,3 +450,71 @@ def test_advance_state_broadcasts_game_state():
     with patch("game._start_timer", return_value=MagicMock(dead=False)):
         game.advance_state(code, mock_io)
     mock_io.emit.assert_called_with("game:state", mock_io.emit.call_args[0][1], to=code)
+
+
+# ---------------------------------------------------------------------------
+# tally_scores — edge cases
+# ---------------------------------------------------------------------------
+
+def test_tally_scores_ignores_votes_for_non_competing_player():
+    """Votes targeting a player not in player_ids are silently discarded."""
+    prompt = {
+        "player_ids": ["p1", "p2"],
+        "votes": {"voter": "p99-not-in-matchup"},
+    }
+    result = game.tally_scores(prompt)
+    assert result["p1"] == 0
+    assert result["p2"] == 0
+
+
+# ---------------------------------------------------------------------------
+# advance_state — score_deltas stored on prompt after voting
+# ---------------------------------------------------------------------------
+
+def test_advance_state_voting_to_scores_stores_score_deltas_on_prompt():
+    code, player_ids = _room_in_submitting()
+    p1_id = player_ids[0]
+    rooms[code]["state"] = "voting"
+    # Add an eligible voter and register their vote for p1
+    voter = {
+        "id": "voter1", "name": "Voter", "role": "player",
+        "avatar_color": "#fff", "socket_id": "sv1", "is_connected": True,
+    }
+    room_store.add_player(code, voter)
+    rooms[code]["prompts"][0]["votes"] = {"voter1": p1_id}
+
+    mock_io = _mock_socketio()
+    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+        game.advance_state(code, mock_io)
+
+    assert "score_deltas" in rooms[code]["prompts"][0]
+    assert rooms[code]["prompts"][0]["score_deltas"][p1_id] == game.POINTS_PER_VOTE
+
+
+# ---------------------------------------------------------------------------
+# start_game — player filtering (disconnected & TV roles)
+# ---------------------------------------------------------------------------
+
+def test_start_game_excludes_disconnected_players():
+    """A disconnected player does not count toward the 2-player minimum."""
+    code, _ = _room_with_n_players(2)
+    rooms[code]["players"][0]["is_connected"] = False
+    mock_io = _mock_socketio()
+    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+        result = game.start_game(code, mock_io)
+    assert result is False  # only 1 connected player → cannot start
+
+
+def test_start_game_excludes_tv_players_from_prompt_assignments():
+    """TV-role players should never appear in any prompt's player_ids."""
+    code, _ = _room_with_n_players(2)
+    tv = {
+        "id": "tv1", "name": "TV", "role": "tv",
+        "avatar_color": "#fff", "socket_id": "stv", "is_connected": True,
+    }
+    room_store.add_player(code, tv)
+    mock_io = _mock_socketio()
+    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+        game.start_game(code, mock_io)
+    all_assigned_ids = {pid for p in rooms[code]["prompts"] for pid in p["player_ids"]}
+    assert "tv1" not in all_assigned_ids

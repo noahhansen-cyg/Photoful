@@ -143,8 +143,7 @@ def handle_join(data):
 
     join_room(code)
     emit("player:self", {"player_id": stored["id"], "role": role})
-    emit("player:joined", {"player": stored}, to=code, include_self=False)
-    emit("game:state", room_store.get_room_state(code))
+    socketio.emit("game:state", room_store.get_room_state(code), to=code)
 
 
 @socketio.on("host:start")
@@ -246,7 +245,7 @@ def handle_disconnect():
     if code and player:
         log.info("room=%-4s event=disconnect    player=%-12s role=%-6s sid=%s",
                  code, player["name"], player["role"], sid)
-        socketio.emit("player:left", {"player_id": player["id"]}, to=code)
+        socketio.emit("game:state", room_store.get_room_state(code), to=code)
     else:
         log.debug("event=disconnect sid=%s (no room found)", sid)
 

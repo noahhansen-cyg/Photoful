@@ -23,6 +23,10 @@ export default function Phone() {
     socket.connect();
     socket.emit("player:join", { room_code: code, name, role: myRole });
 
+    socket.on("connect", () => {
+      // Re-join room on reconnect — server-side room membership is lost on disconnect
+      socket.emit("player:join", { room_code: code, name, role: myRole });
+    });
     socket.on("player:self", ({ player_id, role }) => {
       setMyPlayerId(player_id);
       setMyRole(role);
@@ -31,6 +35,7 @@ export default function Phone() {
     socket.on("error", ({ message }) => setError(message));
 
     return () => {
+      socket.off("connect");
       socket.off("player:self");
       socket.off("game:state");
       socket.off("error");
@@ -115,13 +120,14 @@ function LobbyScreen({ myRole, players, code, name }) {
     socket.emit("host:start", { room_code: code });
   }
 
-  const others = players.filter(p => p.role === "player" && p.name !== name);
+  const others = players.filter(p => p.name !== name);
+  const totalPlayers = players.length;
 
   return (
     <div style={styles.section}>
       {myRole === "host" ? (
         <>
-          <p style={styles.label}>{players.filter(p => p.role === "player").length} player{players.filter(p => p.role === "player").length !== 1 ? "s" : ""} ready</p>
+          <p style={styles.label}>{totalPlayers} player{totalPlayers !== 1 ? "s" : ""} ready</p>
           <button style={styles.bigBtn} onClick={startGame}>
             Start Game
           </button>
@@ -332,7 +338,7 @@ function ScoresScreen({ gameState, players, myPlayerId }) {
   const prompt = gameState?.current_prompt;
   const deltas = prompt?.score_deltas ?? {};
   const myDelta = deltas[myPlayerId] ?? 0;
-  const sorted  = [...players].filter(p => p.role === "player").sort((a, b) => b.score - a.score);
+  const sorted  = [...players].sort((a, b) => b.score - a.score);
 
   return (
     <div style={styles.section}>
@@ -357,7 +363,7 @@ function ScoresScreen({ gameState, players, myPlayerId }) {
 // ---------------------------------------------------------------------------
 
 function FinalScreen({ players, myPlayerId }) {
-  const sorted = [...players].filter(p => p.role === "player").sort((a, b) => b.score - a.score);
+  const sorted = [...players].sort((a, b) => b.score - a.score);
   const winner = sorted[0];
   const iWon   = winner?.id === myPlayerId;
 
