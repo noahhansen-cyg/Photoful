@@ -4,6 +4,7 @@ No Flask/SocketIO imports here so everything is easily unit-testable.
 """
 
 import json
+import math
 import random
 import uuid
 import time
@@ -17,6 +18,7 @@ VOTE_TIMEOUT   = 30   # seconds players have to vote
 SCORES_TIMEOUT = 10   # seconds scores screen is shown before advancing
 
 POINTS_PER_VOTE = 1000
+PROMPTS_PER_PLAYER = 3
 
 
 def load_prompts():
@@ -24,37 +26,65 @@ def load_prompts():
         return json.load(f)
 
 
-def assign_prompts(players, num_prompts=3):
+def _make_pairs(n):
+    """
+    Return a list of (i, j) index pairs so each index 0..n-1 appears in
+    exactly PROMPTS_PER_PLAYER pairs.  For odd n, one index will appear in
+    PROMPTS_PER_PLAYER+1 pairs (unavoidable — total slot count is odd).
+
+    Runs exactly ceil(n * PROMPTS_PER_PLAYER / 2) iterations, always pairing
+    the two players with the highest remaining need so no one is left short.
+    Ties are shuffled for opponent variety.
+    """
+    if n < 2:
+        return []
+
+    total = math.ceil(n * PROMPTS_PER_PLAYER / 2)
+    needs = [PROMPTS_PER_PLAYER] * n
+    pairs = []
+
+    for _ in range(total):
+        order    = sorted(range(n), key=lambda i: needs[i], reverse=True)
+        top_need = needs[order[0]]
+        top  = [i for i in order if needs[i] == top_need]
+        rest = [i for i in order if needs[i] < top_need]
+        random.shuffle(top)
+
+        if len(top) >= 2:
+            i, j = top[0], top[1]
+        else:
+            i, j = top[0], rest[0]
+
+        pairs.append((i, j))
+        needs[i] -= 1
+        needs[j] -= 1
+
+    return pairs
+
+
+def assign_prompts(players):
     """
     Given a list of player dicts, return a list of PromptAssignment dicts.
-    Each prompt is assigned to exactly 2 players.
-
-    Pairing strategy:
-    - Shuffle players once.
-    - For each prompt slot i, pick players at indices (i*2) % N and (i*2+1) % N
-      from the shuffled list (wrapping around). This ensures even distribution
-      and that every player gets at least one prompt.
+    Each prompt is assigned to exactly 2 players.  Every player appears in
+    exactly PROMPTS_PER_PLAYER prompts (one player may get PROMPTS_PER_PLAYER+1
+    when the player count is odd).
     """
-    prompts = random.sample(load_prompts(), num_prompts)
     shuffled = players[:]
     random.shuffle(shuffled)
-    n = len(shuffled)
 
-    assignments = []
-    for i, prompt_text in enumerate(prompts):
-        p1 = shuffled[(i * 2) % n]
-        p2 = shuffled[(i * 2 + 1) % n]
-        # Avoid self-pairing when there's only 1 player (degenerate case)
-        if p1["id"] == p2["id"]:
-            p2 = shuffled[(i * 2 + 1) % max(n, 2)]
-        assignments.append({
+    pairs        = _make_pairs(len(shuffled))
+    prompt_texts = random.sample(load_prompts(), len(pairs))
+
+    return [
+        {
             "prompt_id":   str(uuid.uuid4()),
-            "prompt_text": prompt_text,
-            "player_ids":  [p1["id"], p2["id"]],
+            "prompt_text": text,
+            "player_ids":  [shuffled[i]["id"], shuffled[j]["id"]],
             "submissions": {},
             "votes":       {},
-        })
-    return assignments
+        }
+        for (i, j), text in zip(pairs, prompt_texts)
+    ]
 
 
 def all_submitted(prompt):
