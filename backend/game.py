@@ -12,9 +12,9 @@ import os
 import rooms as room_store
 
 PROMPTS_PATH = os.path.join(os.path.dirname(__file__), "prompts.json")
-SUBMIT_TIMEOUT = 60   # seconds players have to submit a photo
+SUBMIT_TIMEOUT = 90   # seconds players have to submit photos for ALL their prompts
 VOTE_TIMEOUT   = 30   # seconds players have to vote
-SCORES_TIMEOUT = 5    # seconds scores screen is shown before advancing
+SCORES_TIMEOUT = 10   # seconds scores screen is shown before advancing
 
 POINTS_PER_VOTE = 1000
 
@@ -58,8 +58,13 @@ def assign_prompts(players, num_prompts=3):
 
 
 def all_submitted(prompt):
-    """True when every assigned player has a submission."""
+    """True when every assigned player has a submission for this prompt."""
     return all(pid in prompt["submissions"] for pid in prompt["player_ids"])
+
+
+def all_prompts_submitted(prompts):
+    """True when every assigned player has submitted for every prompt."""
+    return all(all_submitted(p) for p in prompts)
 
 
 def all_voted(prompt, connected_players):
@@ -112,6 +117,8 @@ def advance_state(room_code, socketio):
     prompt = room["prompts"][idx] if idx < total else None
 
     if state == "submitting":
+        # All prompts were submitted simultaneously; start voting from the first prompt.
+        room["current_prompt_idx"] = 0
         room["state"]    = "voting"
         room["timer_end"] = time.time() + VOTE_TIMEOUT
         room["timer_greenlet"] = _start_timer(
@@ -131,11 +138,12 @@ def advance_state(room_code, socketio):
     elif state == "scores":
         next_idx = idx + 1
         if next_idx < total:
+            # Move to the next prompt's voting round (no second submitting phase).
             room["current_prompt_idx"] = next_idx
-            room["state"]    = "submitting"
-            room["timer_end"] = time.time() + SUBMIT_TIMEOUT
+            room["state"]    = "voting"
+            room["timer_end"] = time.time() + VOTE_TIMEOUT
             room["timer_greenlet"] = _start_timer(
-                room_code, SUBMIT_TIMEOUT, lambda: advance_state(room_code, socketio), socketio
+                room_code, VOTE_TIMEOUT, lambda: advance_state(room_code, socketio), socketio
             )
         else:
             room["state"]    = "final"

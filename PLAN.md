@@ -31,7 +31,7 @@ The core challenge is real-time state sync between many phones and one TV. Every
 └───────────────┘  └─────────────────────┘
 ```
 
----
+---1
 
 ## Phase 1 — Tech Stack Decisions
 

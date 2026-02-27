@@ -89,9 +89,10 @@ export default function Phone() {
     );
   }
 
-  const state   = gameState?.state ?? "lobby";
-  const prompt  = gameState?.current_prompt;
-  const players = gameState?.players?.filter(p => p.role !== "tv") ?? [];
+  const state      = gameState?.state ?? "lobby";
+  const prompt     = gameState?.current_prompt;
+  const allPrompts = gameState?.prompts ?? [];
+  const players    = gameState?.players?.filter(p => p.role !== "tv") ?? [];
   const isAssigned = prompt?.player_ids?.includes(myPlayerId);
 
   return (
@@ -103,7 +104,7 @@ export default function Phone() {
       {error && <p style={styles.error}>{error}</p>}
 
       {state === "lobby"      && <LobbyScreen myRole={myRole} players={players} code={code} name={name} />}
-      {state === "submitting" && <SubmittingScreen code={code} prompt={prompt} myPlayerId={myPlayerId} isAssigned={isAssigned} timeLeft={timeLeft} />}
+      {state === "submitting" && <SubmittingScreen code={code} allPrompts={allPrompts} myPlayerId={myPlayerId} timeLeft={timeLeft} />}
       {state === "voting"     && <VotingScreen code={code} prompt={prompt} myPlayerId={myPlayerId} isAssigned={isAssigned} players={players} />}
       {state === "scores"     && <ScoresScreen gameState={gameState} players={players} myPlayerId={myPlayerId} />}
       {state === "final"      && <FinalScreen players={players} myPlayerId={myPlayerId} />}
@@ -151,15 +152,44 @@ function LobbyScreen({ myRole, players, code, name }) {
 }
 
 // ---------------------------------------------------------------------------
-// Submitting
+// Submitting — one card per assigned prompt, all shown simultaneously
 // ---------------------------------------------------------------------------
 
-function SubmittingScreen({ code, prompt, myPlayerId, isAssigned, timeLeft }) {
-  const [imageFile, setImageFile]   = useState(null);
-  const [preview, setPreview]       = useState(null);
-  const [caption, setCaption]       = useState("");
-  const [uploading, setUploading]   = useState(false);
-  const [submitted, setSubmitted]   = useState(false);
+function SubmittingScreen({ code, allPrompts, myPlayerId, timeLeft }) {
+  const myPrompts = allPrompts.filter(p => p.player_ids?.includes(myPlayerId));
+
+  if (myPrompts.length === 0) {
+    return (
+      <div style={styles.section}>
+        <p style={styles.label}>Hang tight...</p>
+        <p style={styles.hint}>Others are submitting their photos</p>
+        {timeLeft !== null && <p style={styles.timer(timeLeft <= 10)}>{timeLeft}s</p>}
+      </div>
+    );
+  }
+
+  return (
+    <div style={styles.section}>
+      {timeLeft !== null && <p style={styles.timer(timeLeft <= 10)}>{timeLeft}s</p>}
+      {myPrompts.map(prompt => (
+        <PromptSubmitCard
+          key={prompt.prompt_id}
+          code={code}
+          prompt={prompt}
+          myPlayerId={myPlayerId}
+        />
+      ))}
+    </div>
+  );
+}
+
+function PromptSubmitCard({ code, prompt, myPlayerId }) {
+  const [imageFile, setImageFile] = useState(null);
+  const [preview, setPreview]     = useState(null);
+  const [caption, setCaption]     = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+
   const alreadySubmitted = prompt?.submissions?.[myPlayerId];
 
   async function handleSubmit() {
@@ -172,10 +202,10 @@ function SubmittingScreen({ code, prompt, myPlayerId, isAssigned, timeLeft }) {
       const res  = await fetch(`/api/rooms/${code}/upload`, { method: "POST", body: form });
       const data = await res.json();
       socket.emit("submit:photo", {
-        room_code:  code,
-        prompt_id:  prompt.prompt_id,
-        image_url:  data.image_url,
-        caption:    caption.trim() || null,
+        room_code: code,
+        prompt_id: prompt.prompt_id,
+        image_url: data.image_url,
+        caption:   caption.trim() || null,
       });
       setSubmitted(true);
     } catch (e) {
@@ -185,48 +215,33 @@ function SubmittingScreen({ code, prompt, myPlayerId, isAssigned, timeLeft }) {
     }
   }
 
-  if (!isAssigned) {
-    return (
-      <div style={styles.section}>
-        <p style={styles.label}>Hang tight...</p>
-        <p style={styles.hint}>Others are submitting their photos</p>
-        {timeLeft !== null && <p style={styles.timer(timeLeft <= 10)}>{timeLeft}s</p>}
-      </div>
-    );
+  function handleFileChange(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    setImageFile(file);
+    setPreview(URL.createObjectURL(file));
   }
 
   if (submitted || alreadySubmitted) {
     return (
-      <div style={styles.section}>
+      <div style={styles.submitCard}>
         <div style={styles.bigCheck}>✓</div>
-        <p style={styles.label}>Photo submitted!</p>
-        <p style={styles.hint}>Waiting for the other player...</p>
+        <p style={styles.promptText}>{prompt?.prompt_text}</p>
+        <p style={styles.hint}>Submitted!</p>
       </div>
     );
   }
 
   return (
-    <div style={styles.section}>
+    <div style={styles.submitCard}>
       <p style={styles.promptText}>{prompt?.prompt_text}</p>
-      {timeLeft !== null && <p style={styles.timer(timeLeft <= 10)}>{timeLeft}s</p>}
 
       {preview
         ? <img src={preview} style={styles.previewImg} alt="preview" />
         : (
           <label style={styles.cameraBtn}>
             📷 Take / Choose Photo
-            <input
-              type="file"
-              accept="image/*"
-              capture="environment"
-              style={{ display: "none" }}
-              onChange={e => {
-                const file = e.target.files[0];
-                if (!file) return;
-                setImageFile(file);
-                setPreview(URL.createObjectURL(file));
-              }}
-            />
+            <input type="file" accept="image/*" style={{ display: "none" }} onChange={handleFileChange} />
           </label>
         )
       }
@@ -234,18 +249,7 @@ function SubmittingScreen({ code, prompt, myPlayerId, isAssigned, timeLeft }) {
       {preview && (
         <label style={styles.retakeBtn}>
           Retake
-          <input
-            type="file"
-            accept="image/*"
-            capture="environment"
-            style={{ display: "none" }}
-            onChange={e => {
-              const file = e.target.files[0];
-              if (!file) return;
-              setImageFile(file);
-              setPreview(URL.createObjectURL(file));
-            }}
-          />
+          <input type="file" accept="image/*" style={{ display: "none" }} onChange={handleFileChange} />
         </label>
       )}
 
@@ -335,25 +339,30 @@ function VotingScreen({ code, prompt, myPlayerId, isAssigned, players }) {
 // ---------------------------------------------------------------------------
 
 function ScoresScreen({ gameState, players, myPlayerId }) {
-  const prompt = gameState?.current_prompt;
-  const deltas = prompt?.score_deltas ?? {};
-  const myDelta = deltas[myPlayerId] ?? 0;
-  const sorted  = [...players].sort((a, b) => b.score - a.score);
+  const prompt     = gameState?.current_prompt;
+  const deltas     = prompt?.score_deltas ?? {};
+  const playerIds  = prompt?.player_ids ?? [];
+  const myDelta    = deltas[myPlayerId] ?? 0;
+
+  // Determine round winner among competing players
+  const maxDelta  = Math.max(0, ...playerIds.map(pid => deltas[pid] ?? 0));
+  const winnerIds = playerIds.filter(pid => (deltas[pid] ?? 0) === maxDelta && maxDelta > 0);
+  const isTie     = winnerIds.length > 1;
+  const winner    = winnerIds.length === 1 ? players.find(p => p.id === winnerIds[0]) : null;
+
+  const headline = maxDelta === 0
+    ? "No votes this round!"
+    : isTie
+      ? "It's a tie!"
+      : `${winner?.name} wins the round!`;
 
   return (
     <div style={styles.section}>
+      <p style={styles.label}>{headline}</p>
       {myDelta > 0 && <p style={styles.myDelta}>+{myDelta.toLocaleString()} pts!</p>}
-      <p style={styles.label}>Leaderboard</p>
-      <div style={styles.playerList}>
-        {sorted.map((p, i) => (
-          <div key={p.id} style={styles.playerRow}>
-            <span style={styles.rankText}>#{i + 1}</span>
-            <span style={{ flex: 1, color: p.id === myPlayerId ? "#6c63ff" : "#fff" }}>{p.name}</span>
-            {deltas[p.id] > 0 && <span style={{ color: "#4ecdc4", fontSize: "0.85rem" }}>+{deltas[p.id].toLocaleString()}</span>}
-            <span style={{ color: "#6c63ff", fontWeight: "bold" }}>{p.score.toLocaleString()}</span>
-          </div>
-        ))}
-      </div>
+      {myDelta === 0 && maxDelta > 0 && !winnerIds.includes(myPlayerId) && (
+        <p style={styles.hint}>Better luck next round</p>
+      )}
     </div>
   );
 }
@@ -417,7 +426,8 @@ const styles = {
     border: `1px solid ${role === "host" ? "#ffd700" : "#6c63ff"}`,
   }),
 
-  section: { display: "flex", flexDirection: "column", alignItems: "center", gap: "1rem", width: "100%", maxWidth: "420px" },
+  section:    { display: "flex", flexDirection: "column", alignItems: "center", gap: "1rem", width: "100%", maxWidth: "420px" },
+  submitCard: { display: "flex", flexDirection: "column", alignItems: "center", gap: "1rem", width: "100%", background: "#1a1a2e", border: "1px solid #2d2d44", borderRadius: 12, padding: "1.25rem" },
 
   label:      { fontSize: "1.3rem", fontWeight: "bold", margin: 0, textAlign: "center" },
   hint:       { fontSize: "0.9rem", color: "#888", margin: 0, textAlign: "center" },

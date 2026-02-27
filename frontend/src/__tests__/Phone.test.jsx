@@ -347,23 +347,34 @@ describe("Phone voting screen", () => {
 // ---------------------------------------------------------------------------
 
 describe("Phone scores screen", () => {
+  function emitScores(myId) {
+    emit("player:self", { player_id: myId, role: "player" });
+    emit("game:state", {
+      state: "scores",
+      current_prompt: {
+        player_ids: ["p1", "p2"],
+        score_deltas: { "p1": 1000, "p2": 0 },
+      },
+      players: [
+        { id: "p1", name: "Alice", role: "player", avatar_color: "#FF6B6B", score: 1000 },
+        { id: "p2", name: "Bob",   role: "player", avatar_color: "#4ECDC4", score: 0 },
+      ],
+    });
+  }
+
+  it("announces the round winner", async () => {
+    renderPhone();
+    await userEvent.type(screen.getByPlaceholderText(/your name/i), "Carol");
+    await userEvent.click(screen.getByRole("button", { name: /join game/i }));
+    act(() => emitScores("p3"));
+    expect(screen.getByText(/alice wins the round/i)).toBeInTheDocument();
+  });
+
   it("shows a personal points delta when the player earned points", async () => {
     renderPhone();
     await userEvent.type(screen.getByPlaceholderText(/your name/i), "Alice");
     await userEvent.click(screen.getByRole("button", { name: /join game/i }));
-
-    act(() => { emit("player:self", { player_id: "p1", role: "player" }); });
-    act(() => {
-      emit("game:state", {
-        state: "scores",
-        current_prompt: { score_deltas: { "p1": 1000 } },
-        players: [
-          { id: "p1", name: "Alice", role: "player", avatar_color: "#FF6B6B", score: 1000 },
-          { id: "p2", name: "Bob",   role: "player", avatar_color: "#4ECDC4", score: 0 },
-        ],
-      });
-    });
-
+    act(() => emitScores("p1"));
     // Matches "+1,000 pts!" or "+1000 pts!" depending on locale
     expect(screen.getByText(/\+.+pts/i)).toBeInTheDocument();
   });

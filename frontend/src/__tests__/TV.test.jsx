@@ -251,9 +251,7 @@ describe("TV lobby QR code", () => {
     act(() => {
       emit("game:state", {
         state: "submitting",
-        prompt_number: 1,
-        total_prompts: 3,
-        current_prompt: { player_ids: [], submissions: {} },
+        prompts: [{ prompt_id: "pid-1", player_ids: ["1"], submissions: {} }],
         players: [{ id: "1", name: "Alice", role: "player", avatar_color: "#FF6B6B" }],
       });
     });
@@ -303,12 +301,13 @@ describe("TV submitting screen", () => {
   function emitSubmitting() {
     emit("game:state", {
       state: "submitting",
-      prompt_number: 2,
-      total_prompts: 3,
-      current_prompt: {
-        player_ids: ["1", "2"],
-        submissions: { "1": { image_url: "/img.jpg", caption: null } }, // Alice submitted, Bob hasn't
-      },
+      prompts: [
+        {
+          prompt_id: "pid-1",
+          player_ids: ["1", "2"],
+          submissions: { "1": { image_url: "/img.jpg", caption: null } }, // Alice submitted, Bob hasn't
+        },
+      ],
       players: [
         { id: "1", name: "Alice", role: "player", avatar_color: "#FF6B6B" },
         { id: "2", name: "Bob",   role: "player", avatar_color: "#4ECDC4" },
@@ -316,10 +315,10 @@ describe("TV submitting screen", () => {
     });
   }
 
-  it("shows the prompt number badge", () => {
+  it("shows the 'Players are taking photos' heading", () => {
     renderTV();
     act(() => emitSubmitting());
-    expect(screen.getByText(/prompt 2 of 3/i)).toBeInTheDocument();
+    expect(screen.getByText(/players are taking photos/i)).toBeInTheDocument();
   });
 
   it("shows a checkmark for a player who has submitted", () => {
@@ -381,40 +380,39 @@ describe("TV scores screen", () => {
   function emitScores() {
     emit("game:state", {
       state: "scores",
-      current_prompt: { score_deltas: { "1": 1000 } },
+      current_prompt: {
+        player_ids: ["1", "2"],
+        submissions: {
+          "1": { image_url: "/alice.jpg", caption: null },
+          "2": { image_url: "/bob.jpg",   caption: null },
+        },
+        votes: { "3": "1" },               // Carol voted for Alice
+        score_deltas: { "1": 1000, "2": 0 },
+      },
       players: [
-        // Intentionally out of order — the screen should sort descending
-        { id: "2", name: "Bob",   role: "player", avatar_color: "#4ECDC4", score: 500 },
         { id: "1", name: "Alice", role: "player", avatar_color: "#FF6B6B", score: 1000 },
+        { id: "2", name: "Bob",   role: "player", avatar_color: "#4ECDC4", score: 0 },
       ],
     });
   }
 
-  it("shows the Round Results heading", () => {
+  it("announces the round winner by name", () => {
     renderTV();
     act(() => emitScores());
-    expect(screen.getByText(/round results/i)).toBeInTheDocument();
+    expect(screen.getByText(/alice wins the round/i)).toBeInTheDocument();
   });
 
-  it("renders a leaderboard row for each player", () => {
+  it("shows the points earned by the round winner", () => {
     renderTV();
     act(() => emitScores());
-    expect(screen.getByText("Alice")).toBeInTheDocument();
-    expect(screen.getByText("Bob")).toBeInTheDocument();
+    expect(screen.getAllByText(/\+1[,.]?000 pts/i).length).toBeGreaterThanOrEqual(1);
   });
 
-  it("sorts players by score so the higher scorer appears first", () => {
+  it("shows vote counts for competing players", () => {
     renderTV();
     act(() => emitScores());
-    const text = document.body.textContent;
-    expect(text.indexOf("Alice")).toBeLessThan(text.indexOf("Bob"));
-  });
-
-  it("shows a score delta for the round winner", () => {
-    renderTV();
-    act(() => emitScores());
-    // Matches "+1,000" or "+1000" depending on locale
-    expect(screen.getByText(/^\+\d/)).toBeInTheDocument();
+    expect(screen.getByText(/1 vote\b/i)).toBeInTheDocument();   // Alice has 1
+    expect(screen.getByText(/0 votes/i)).toBeInTheDocument();    // Bob has 0
   });
 });
 

@@ -219,8 +219,7 @@ def handle_submit_photo(data):
     log.info("room=%-4s event=submit:photo player=%-12s sid=%s", code, sender["name"], sid)
     socketio.emit("game:state", room_store.get_room_state(code), to=code)
 
-    prompt = room_store.get_current_prompt(code)
-    if prompt and game.all_submitted(prompt):
+    if game.all_prompts_submitted(room["prompts"]):
         log.info("room=%-4s event=all_submitted — advancing early", code)
         game.cancel_timer(room)
         game.advance_state(code, socketio)
