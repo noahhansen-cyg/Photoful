@@ -169,3 +169,21 @@ def test_upload_is_case_insensitive_for_room_code(client):
         content_type="multipart/form-data",
     )
     assert response.status_code == 201
+
+
+# ---------------------------------------------------------------------------
+# GET /api/server-info
+# ---------------------------------------------------------------------------
+
+def test_server_info_returns_200(client):
+    response = client.get("/api/server-info")
+    assert response.status_code == 200
+
+
+def test_server_info_returns_local_ip(client):
+    response = client.get("/api/server-info")
+    data = response.get_json()
+    assert "local_ip" in data
+    # Should be a non-empty string (either a real IP or the "localhost" fallback)
+    assert isinstance(data["local_ip"], str)
+    assert len(data["local_ip"]) > 0

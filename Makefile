@@ -1,4 +1,4 @@
-.PHONY: dev stop test test-backend test-frontend install
+.PHONY: dev devtest stop test test-backend test-frontend install
 
 # Start both servers. Ctrl+C stops everything cleanly.
 dev:
@@ -6,6 +6,18 @@ dev:
 	@trap 'kill 0' INT; \
 	  cd backend && python app.py & \
 	  cd frontend && npm run dev & \
+	  wait
+
+# Start servers + 3 bot players for end-to-end testing without extra browser windows.
+# Bots create a room automatically and print the TV URL; open it in your browser.
+# Ctrl+C stops everything.
+devtest:
+	@echo "Starting backend, frontend, and 3 bot players..."
+	@echo "(Bot players will create a room and print the TV URL after ~3 s)"
+	@trap 'kill 0' INT; \
+	  (cd backend && python app.py) & \
+	  (cd frontend && npm run dev) & \
+	  (sleep 3 && cd backend && python bots.py) & \
 	  wait
 
 # Kill anything still holding the ports

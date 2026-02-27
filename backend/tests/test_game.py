@@ -123,6 +123,30 @@ def test_all_submitted_true_when_both_submitted():
 
 
 # ---------------------------------------------------------------------------
+# all_prompts_submitted
+# ---------------------------------------------------------------------------
+
+def test_all_prompts_submitted_false_when_any_prompt_incomplete():
+    prompts = [
+        {"player_ids": ["p1", "p2"], "submissions": {"p1": {}, "p2": {}}},
+        {"player_ids": ["p3", "p4"], "submissions": {"p3": {}}},  # p4 missing
+    ]
+    assert game.all_prompts_submitted(prompts) is False
+
+
+def test_all_prompts_submitted_true_when_all_complete():
+    prompts = [
+        {"player_ids": ["p1", "p2"], "submissions": {"p1": {}, "p2": {}}},
+        {"player_ids": ["p3", "p4"], "submissions": {"p3": {}, "p4": {}}},
+    ]
+    assert game.all_prompts_submitted(prompts) is True
+
+
+def test_all_prompts_submitted_true_for_empty_list():
+    assert game.all_prompts_submitted([]) is True
+
+
+# ---------------------------------------------------------------------------
 # all_voted
 # ---------------------------------------------------------------------------
 
@@ -413,14 +437,14 @@ def test_advance_state_voting_to_scores():
     assert rooms[code]["state"] == "scores"
 
 
-def test_advance_state_scores_to_next_submitting():
+def test_advance_state_scores_to_next_voting():
     code, _ = _room_in_submitting()
     rooms[code]["state"] = "scores"
     rooms[code]["current_prompt_idx"] = 0  # still prompts left
     mock_io = _mock_socketio()
     with patch("game._start_timer", return_value=MagicMock(dead=False)):
         game.advance_state(code, mock_io)
-    assert rooms[code]["state"] == "submitting"
+    assert rooms[code]["state"] == "voting"
     assert rooms[code]["current_prompt_idx"] == 1
 
 

@@ -126,7 +126,8 @@ def get_room_state(code):
         "room_code":      code,
         "state":          room["state"],
         "players":        connected_players,
-        "current_prompt": prompt,
+        "prompts":        room["prompts"],    # all prompts (used during submitting phase)
+        "current_prompt": prompt,             # the active prompt for voting/scores
         "timer_end":      room.get("timer_end"),
         "prompt_number":  idx + 1 if total else 0,
         "total_prompts":  total,

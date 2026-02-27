@@ -53,7 +53,7 @@ export default function TV() {
         {state === "lobby"      && <LobbyScreen players={players} code={code} />}
         {state === "submitting" && <SubmittingScreen gameState={gameState} players={players} timeLeft={timeLeft} />}
         {state === "voting"     && <VotingScreen gameState={gameState} players={players} timeLeft={timeLeft} />}
-        {state === "scores"     && <ScoresScreen gameState={gameState} players={players} />}
+        {state === "scores"     && <ScoresScreen gameState={gameState} players={players} timeLeft={timeLeft} />}
         {state === "final"      && <FinalScreen players={players} />}
       </div>
     </div>
@@ -84,7 +84,17 @@ function Header({ code, connected }) {
 // ---------------------------------------------------------------------------
 
 function LobbyScreen({ players, code }) {
-  const joinUrl = `${window.location.protocol}//${window.location.host}/room/${code}/phone`;
+  const [localIp, setLocalIp] = useState(null);
+  useEffect(() => {
+    fetch("/api/server-info")
+      .then(r => r.json())
+      .then(data => setLocalIp(data.local_ip))
+      .catch(() => {}); // fall back to window.location.host on error
+  }, []);
+
+  const port    = window.location.port ? `:${window.location.port}` : "";
+  const host    = localIp ? `${localIp}${port}` : window.location.host;
+  const joinUrl = `${window.location.protocol}//${host}/room/${code}/phone`;
   return (
     <div style={styles.centered}>
       <div style={styles.lobbyLayout}>
@@ -119,23 +129,31 @@ function LobbyScreen({ players, code }) {
 // ---------------------------------------------------------------------------
 
 function SubmittingScreen({ gameState, players, timeLeft }) {
-  const prompt      = gameState?.current_prompt;
-  const submissions = prompt?.submissions ?? {};
-  const assigned    = new Set(prompt?.player_ids ?? []);
+  const allPrompts    = gameState?.prompts ?? [];
+  const totalExpected = allPrompts.reduce((sum, p) => sum + (p.player_ids?.length ?? 0), 0);
+  const totalReceived = allPrompts.reduce((sum, p) => sum + Object.keys(p.submissions ?? {}).length, 0);
+  const getPlayer     = (id) => players.find(p => p.id === id);
 
   return (
     <div style={styles.centered}>
-      <div style={styles.promptBadge}>
-        Prompt {gameState.prompt_number} of {gameState.total_prompts}
-      </div>
       <h2 style={styles.bigLabel}>Players are taking photos...</h2>
-      <TimerBar timeLeft={timeLeft} total={60} />
-      <div style={styles.playerGrid}>
-        {players.map(p => (
-          <div key={p.id} style={styles.checkCard}>
-            <PlayerAvatar player={p} dim={!assigned.has(p.id)} />
-            <div style={styles.checkmark(p.id in submissions)}>
-              {p.id in submissions ? "✓" : "·"}
+      <p style={styles.hint}>{totalReceived} / {totalExpected} photos submitted</p>
+      <TimerBar timeLeft={timeLeft} total={90} />
+      <div style={styles.promptProgressGrid}>
+        {allPrompts.map((prompt, i) => (
+          <div key={prompt.prompt_id} style={styles.promptProgressRow}>
+            <span style={styles.promptBadge}>Prompt {i + 1}</span>
+            <div style={{ display: "flex", gap: "1.5rem" }}>
+              {(prompt.player_ids ?? []).map(pid => {
+                const player = getPlayer(pid);
+                const done   = pid in (prompt.submissions ?? {});
+                return (
+                  <div key={pid} style={styles.checkCard}>
+                    {player && <PlayerAvatar player={player} />}
+                    <div style={styles.checkmark(done)}>{done ? "✓" : "·"}</div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         ))}
@@ -188,26 +206,53 @@ function VotingScreen({ gameState, players, timeLeft }) {
 // Scores
 // ---------------------------------------------------------------------------
 
-function ScoresScreen({ gameState, players }) {
-  const prompt = gameState?.current_prompt;
-  const deltas = prompt?.score_deltas ?? {};
-  const sorted = [...players].sort((a, b) => b.score - a.score);
+function ScoresScreen({ gameState, players, timeLeft }) {
+  const prompt      = gameState?.current_prompt;
+  const submissions = prompt?.submissions ?? {};
+  const playerIds   = prompt?.player_ids ?? [];
+  const votes       = prompt?.votes ?? {};
+  const deltas      = prompt?.score_deltas ?? {};
+  const getPlayer   = (id) => players.find(p => p.id === id);
+  const voteCount   = (pid) => Object.values(votes).filter(v => v === pid).length;
+
+  // Determine the round winner (highest delta among competing players)
+  const maxDelta  = Math.max(0, ...playerIds.map(pid => deltas[pid] ?? 0));
+  const winnerIds = playerIds.filter(pid => (deltas[pid] ?? 0) === maxDelta && maxDelta > 0);
+  const isTie     = winnerIds.length > 1;
+  const winner    = winnerIds.length === 1 ? getPlayer(winnerIds[0]) : null;
+
+  const headline = maxDelta === 0
+    ? "No votes this round!"
+    : isTie
+      ? "It's a tie!"
+      : `${winner?.name} wins the round!`;
 
   return (
     <div style={styles.centered}>
-      <h2 style={styles.bigLabel}>Round Results</h2>
-      <div style={styles.leaderboard}>
-        {sorted.map((p, i) => (
-          <div key={p.id} style={styles.leaderRow}>
-            <span style={styles.rank}>#{i + 1}</span>
-            <div style={{ ...styles.avatarSmall, background: p.avatar_color }}>
-              {p.name[0].toUpperCase()}
+      <h2 style={styles.bigLabel}>{headline}</h2>
+      {maxDelta > 0 && !isTie && (
+        <p style={styles.roundPoints}>+{maxDelta.toLocaleString()} pts</p>
+      )}
+      <TimerBar timeLeft={timeLeft} total={10} />
+      <div style={styles.photoRow}>
+        {playerIds.map(pid => {
+          const sub      = submissions[pid];
+          const player   = getPlayer(pid);
+          const isWinner = winnerIds.includes(pid);
+          return (
+            <div key={pid} style={styles.scorePhotoCard(isWinner)}>
+              {sub
+                ? <img src={sub.image_url} style={styles.photo} alt={player?.name} />
+                : <div style={styles.photoPlaceholder}>No photo</div>}
+              <div style={styles.photoName(player?.avatar_color)}>{player?.name}</div>
+              {sub?.caption && <div style={styles.caption}>"{sub.caption}"</div>}
+              <div style={styles.voteCount}>
+                {voteCount(pid)} vote{voteCount(pid) !== 1 ? "s" : ""}
+                {deltas[pid] > 0 && <span style={styles.inlineDelta}> · +{deltas[pid].toLocaleString()} pts</span>}
+              </div>
             </div>
-            <span style={styles.leaderName}>{p.name}</span>
-            {deltas[p.id] > 0 && <span style={styles.delta}>+{deltas[p.id].toLocaleString()}</span>}
-            <span style={styles.score}>{p.score.toLocaleString()}</span>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -299,8 +344,11 @@ const styles = {
   checkCard:   { display: "flex", flexDirection: "column", alignItems: "center", gap: "0.4rem" },
   checkmark: (done) => ({ fontSize: "1.5rem", color: done ? "#4ecdc4" : "#555", fontWeight: "bold" }),
 
-  photoRow:    { display: "flex", gap: "3rem", flexWrap: "wrap", justifyContent: "center" },
-  photoCard:   { display: "flex", flexDirection: "column", alignItems: "center", gap: "0.75rem", maxWidth: "340px" },
+  photoRow:       { display: "flex", gap: "3rem", flexWrap: "wrap", justifyContent: "center" },
+  photoCard:      { display: "flex", flexDirection: "column", alignItems: "center", gap: "0.75rem", maxWidth: "340px" },
+  scorePhotoCard: (winner) => ({ display: "flex", flexDirection: "column", alignItems: "center", gap: "0.75rem", maxWidth: "340px", outline: winner ? "4px solid #4ecdc4" : "none", borderRadius: 14, padding: winner ? "0.5rem" : 0 }),
+  roundPoints:    { fontSize: "1.8rem", fontWeight: "bold", color: "#4ecdc4", margin: 0 },
+  inlineDelta:    { color: "#4ecdc4", fontWeight: "bold" },
   photo:       { width: "100%", maxWidth: "340px", maxHeight: "360px", objectFit: "cover", borderRadius: 12, border: "3px solid #2d2d44" },
   photoPlaceholder: { width: 300, height: 300, background: "#1a1a2e", borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center", color: "#555" },
   photoName: (color) => ({ fontSize: "1.3rem", fontWeight: "bold", color: color ?? "#fff" }),
@@ -319,6 +367,9 @@ const styles = {
   leaderName:  { flex: 1, fontSize: "1.1rem" },
   delta:       { fontSize: "1rem", color: "#4ecdc4", fontWeight: "bold" },
   score:       { fontSize: "1.2rem", fontWeight: "bold", color: "#6c63ff" },
+
+  promptProgressGrid: { display: "flex", flexDirection: "column", gap: "1rem", width: "100%", maxWidth: "600px" },
+  promptProgressRow:  { display: "flex", alignItems: "center", gap: "1.5rem", background: "#1a1a2e", borderRadius: 10, padding: "0.75rem 1.25rem" },
 
   lobbyLayout:   { display: "flex", gap: "4rem", alignItems: "center", flexWrap: "wrap", justifyContent: "center" },
   qrSection:     { display: "flex", flexDirection: "column", alignItems: "center", gap: "0.75rem", background: "#1a1a2e", borderRadius: 16, padding: "1.5rem", border: "2px solid #2d2d44" },

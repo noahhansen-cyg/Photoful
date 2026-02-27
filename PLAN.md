@@ -1,349 +1,267 @@
-# Photo Quiplash — Extensive Project Plan
+# Photo Quiplash — Architecture & Design
 
 ## Overview
 
-This game has three "screens" at any moment:
-- **TV/Big Screen** — Shows prompts, photos, voting UI, scores (a browser tab fullscreened)
-- **Player Phone** — Submission interface, voting interface (mobile browser, no app install needed)
-- **Host** — Could be a dedicated host screen or the TV itself advances rounds
+Three screens at any moment:
+- **TV/Big Screen** — Shows prompts, photos, voting UI, scores (browser tab fullscreened on a TV)
+- **Player Phone** — Submission and voting interface (mobile browser, no app install)
+- **Host Phone** — Same as player phone but with a Start Game button; host is a regular player too
 
-The core challenge is real-time state sync between many phones and one TV. Everything else is product work.
+The server owns all state. Phones and TV are just views that re-render on every `game:state` broadcast.
 
 ---
 
-## High-Level Architecture
+## Architecture
 
 ```
 ┌─────────────────────────────────────────┐
 │              Game Server                │
-│  - Room management                      │
+│  Flask + Flask-SocketIO + gevent        │
+│  - Room management (in-memory)          │
 │  - Game state machine                   │
 │  - WebSocket hub                        │
 │  - REST API for image uploads           │
-│  - Prompt bank                          │
+│  - Prompt bank (prompts.json)           │
 └────────┬──────────────┬─────────────────┘
          │              │
     WebSocket       HTTP/REST
          │              │
 ┌────────▼──────┐  ┌────▼────────────────┐
 │  TV Browser   │  │  Player Phone       │
-│  (display)    │  │  (mobile browser)   │
+│  React + Vite │  │  React + Vite       │
 └───────────────┘  └─────────────────────┘
 ```
 
 ---
 
-## Phase 1 — Tech Stack Decisions
-
-### Backend
-**Python** is the right choice here because:
-- **Flask-SocketIO** is a direct port of the socket.io API — event names and room logic map 1:1
-- **Pillow** is the best image processing library across Python/Ruby/Go — dead simple resizing
-- Fast to prototype, easy to read and maintain
-- Straightforward to deploy anywhere
-
-**Implemented:** **Flask** + **Flask-SocketIO** with **gevent** for async WebSocket handling (eventlet deprecated)
-
-### Real-time Layer
-**Flask-SocketIO** — wraps socket.io conventions (rooms, namespaces, reconnection) in idiomatic Python. Events look like this:
-
-```python
-@socketio.on("player:join")
-def handle_join(data):
-    join_room(data["roomCode"])
-    emit("game:state", current_state, to=data["roomCode"])
-```
-
-### Image Storage
-- **Development:** Store locally on disk
-- **Production:** Cloudflare R2 or AWS S3 (cheap, scalable, pre-signed URLs for direct upload)
-
-### Frontend (TV + Phone)
-**React + Vite** — straightforward, widely documented, easy to find help for. Flask serves the built static files, or deploy frontend separately.
-
-### Database
-**SQLite** (via SQLAlchemy ORM) for a small game — you don't need Postgres. Rooms expire after a session anyway. For production scale, swap to Postgres.
-
----
-
-## Phase 2 — Core Data Model
-
-```python
-# A room represents one full game session
-class Room:
-    id: str              # "XKCD" — 4 letter join code
-    host_id: str
-    state: str           # lobby | submitting | voting | results | ended
-    current_round: int
-    current_prompt_index: int
-    players: list[Player]
-    rounds: list[Round]
-    created_at: datetime
-
-class Player:
-    id: str
-    socket_id: str
-    name: str
-    avatar_color: str
-    score: int
-    is_connected: bool
-
-class Round:
-    prompts: list[PromptAssignment]  # which players get which prompts
-
-class PromptAssignment:
-    prompt_text: str
-    assigned_player_ids: list[str]  # 2 players get the same prompt (like quiplash)
-    submissions: list[Submission]
-
-class Submission:
-    player_id: str
-    image_url: str
-    caption: str | None  # optional text caption alongside photo
-    votes: list[str]     # player_ids who voted for this
-```
-
----
-
-## Phase 3 — Game State Machine
-
-The server owns all state. Phones and TV are just views.
+## State Machine
 
 ```
 LOBBY
-  → (host starts game) → ASSIGNING_PROMPTS
+  → (host taps Start Game, ≥2 players) → SUBMITTING
 
-ASSIGNING_PROMPTS
-  → (server deals prompts) → SUBMITTING
+SUBMITTING  (90s)
+  All prompts are active simultaneously. Each player sees all their assigned
+  prompts at once and submits a photo for each.
+  → (all players submitted for all prompts, OR timer expires) → VOTING
 
-SUBMITTING
-  → (all submitted OR timer expires) → REVEALING
+VOTING  (30s per prompt)
+  TV shows two competing photos side-by-side.
+  Non-competing players vote on their phone.
+  → (all eligible players voted, OR timer expires) → SCORES
 
-REVEALING  (show submissions one prompt at a time)
-  → (advance through each matchup) → VOTING
+SCORES  (10s)
+  TV shows both competing photos with round winner highlighted and points earned.
+  No leaderboard yet — that's reserved for the end.
+  → (more prompts remain) → VOTING (next prompt)
+  → (all prompts done) → FINAL
 
-VOTING  (per matchup)
-  → (all voted OR timer expires) → SCORES
-
-SCORES  (show who got what votes, update leaderboard)
-  → (more prompts remain) → REVEALING
-  → (all prompts done, more rounds remain) → ASSIGNING_PROMPTS
-  → (game over) → FINAL_RESULTS
-
-FINAL_RESULTS
-  → (host restarts) → LOBBY
+FINAL
+  Overall leaderboard with winner crown. Game over.
 ```
-
-Every state transition broadcasts a WebSocket event to all clients in the room. The TV and phones re-render based on current state.
 
 ---
 
-## Phase 4 — WebSocket Event Contract
+## Data Model
 
-Define every event up front. This is your API between frontend and backend.
+All state is in-memory (Python dicts). No database.
 
-### Server → All Clients
 ```python
-# State changed
-emit("game:state",    {"state", "round", "prompt", "timer", "submissions", "scores"}, to=room_code)
-emit("player:joined", {"player": player},                                              to=room_code)
-emit("player:left",   {"player_id": player_id},                                       to=room_code)
-emit("timer:tick",    {"seconds_remaining": n},                                        to=room_code)
+# Room
+{
+    "room_code":           str,         # "ABCD"
+    "state":               str,         # lobby | submitting | voting | scores | final
+    "players":             list[Player],
+    "prompts":             list[Prompt],
+    "current_prompt_idx":  int,
+    "timer_end":           float | None, # unix timestamp
+    "timer_greenlet":      Greenlet | None,
+    "host_id":             str | None,
+}
+
+# Player
+{
+    "id":           str,   # uuid
+    "socket_id":    str,
+    "name":         str,
+    "role":         str,   # "player" | "host" | "tv"
+    "avatar_color": str,   # hex colour
+    "score":        int,
+    "is_connected": bool,
+}
+
+# Prompt
+{
+    "prompt_id":   str,         # uuid
+    "prompt_text": str,
+    "player_ids":  [str, str],  # exactly 2 competing players
+    "submissions": {player_id: {"image_url": str, "caption": str | None}},
+    "votes":       {voter_id: voted_for_player_id},
+    "score_deltas": {player_id: int},  # set after tallying
+}
 ```
 
-### Phone → Server
+---
+
+## WebSocket Event Contract
+
+### Client → Server
+| Event | Payload | Description |
+|---|---|---|
+| `player:join` | `{room_code, name, role}` | Join or rejoin a room |
+| `host:start` | `{room_code}` | Host starts the game |
+| `submit:photo` | `{room_code, prompt_id, image_url, caption?}` | Player submits a photo |
+| `submit:vote` | `{room_code, prompt_id, voted_for_id}` | Player casts a vote |
+
+### Server → All Clients in Room
+| Event | Payload | Description |
+|---|---|---|
+| `game:state` | (see below) | Full room state broadcast on every transition |
+
+### Server → Joining Client Only
+| Event | Payload | Description |
+|---|---|---|
+| `player:self` | `{player_id, role}` | Phone stores this to know its own identity |
+| `error` | `{message}` | e.g. room not found, already started |
+
+### `game:state` Payload
+```json
+{
+  "room_code": "ABCD",
+  "state": "lobby|submitting|voting|scores|final",
+  "players": [{"id", "name", "role", "avatar_color", "score", "is_connected"}],
+  "prompts": [...],
+  "current_prompt": {
+    "prompt_id": "...",
+    "prompt_text": "Show us...",
+    "player_ids": ["id1", "id2"],
+    "submissions": {"id1": {"image_url": "/uploads/...", "caption": null}},
+    "votes": {"voter_id": "id1"},
+    "score_deltas": {"id1": 1000, "id2": 0}
+  },
+  "prompt_number": 1,
+  "total_prompts": 3,
+  "timer_end": 1234567890.0
+}
+```
+
+---
+
+## Image Upload Flow
+
+Photos are large — they go over HTTP, not WebSocket.
+
+```
+1. Phone picks a photo (camera or camera roll)
+2. browser-image-compression compresses to <1MB client-side
+3. Phone POSTs multipart/form-data to /api/rooms/:code/upload
+4. Server (Pillow): thumbnail to max 1280×1280, save as JPEG q=80
+5. Server returns { image_url: "/uploads/<code>/<uuid>.jpg" }
+6. Phone emits submit:photo with the image_url
+```
+
+---
+
+## Prompt Assignment
+
+`assign_prompts(players, num=3)`:
+- Randomly sample 3 prompts from the bank
+- Shuffle the player list once
+- For prompt i, pair players at indices `(i*2) % n` and `(i*2+1) % n`
+- This gives even distribution — every player competes in roughly equal matchups
+
+---
+
+## Scoring
+
+- 1000 points per vote received
+- Computed in `tally_scores(prompt)` after voting closes
+- Applied to player scores in `apply_scores(room_code, prompt)`
+- `score_deltas` stored on the prompt for display on the scores screen
+
+---
+
+## Timer System
+
+Timers use gevent greenlets:
+
 ```python
-@socketio.on("player:join")   # data: { room_code, name }
-@socketio.on("submit:photo")  # data: { prompt_id, image_url, caption? }
-@socketio.on("submit:vote")   # data: { prompt_id, submission_id }
+def _start_timer(room_code, seconds, callback, socketio):
+    def _run():
+        gevent.sleep(seconds)
+        room["timer_greenlet"] = None
+        callback()
+    return gevent.spawn(_run)
 ```
 
-### Server → Specific Phone
-```python
-emit("prompt:assigned", {"prompt_id": ..., "prompt_text": ...}, to=socket_id)
-emit("submit:ack",      {"success": True},                       to=socket_id)
-emit("your:score",      {"delta": 500, "total": 1500},           to=socket_id)
-```
+`cancel_timer(room)` kills the greenlet early (when all players act before time runs out).
+
+Timeouts:
+- Submit: 90s
+- Vote: 30s
+- Scores display: 10s
 
 ---
 
-## Phase 5 — Image Upload Flow
+## Key Design Decisions
 
-Photos are large — don't send them through WebSocket. Use a two-step flow:
+**All prompts before voting.** Rather than cycling prompt-by-prompt through the full loop, all players submit photos for all their prompts in one 90s window, then the game moves through each prompt's voting/scores phase in sequence. This keeps the submission energy high and avoids dead time waiting for a single pair.
 
-```
-1. Phone selects photo from camera roll or takes new photo
-2. Phone POSTs to /api/rooms/:roomCode/upload
-   - Server validates: correct room, correct player, submission window open
-   - Server resizes image (max 1280px wide, JPEG, ~80% quality) using `Pillow`
-   - Server stores image, returns { imageUrl }
-3. Phone sends WebSocket event "submit:photo" with the returned imageUrl
-4. Server associates submission with prompt
-```
+**Scores screen shows photos, not leaderboard.** The leaderboard only appears at the very end. The scores screen shows the two competing photos with the round winner highlighted — keeps the focus on the content rather than standings mid-game.
 
-This keeps WebSocket messages tiny and images handled properly.
+**Host is a player.** The host joins via their phone just like anyone else. They get the Start Game button and also participate in prompts. No dedicated host screen needed.
 
-**Image resize is critical** — players will try to upload 12MP iPhone RAW photos. Resize everything server-side before storing.
+**TV joins as role "tv".** The TV emits `player:join` with `role: "tv"` so it receives `game:state` broadcasts. It's excluded from player lists and prompt assignment.
+
+**Reconnection.** Sockets reconnect automatically. On reconnect, clients re-emit `player:join`; the server restores their player record and re-broadcasts current state.
 
 ---
 
-## Phase 6 — TV Display UI
+## File Map
 
-The TV screen is a single fullscreen browser tab at `/room/:code/tv`. It should be designed for 1080p/4K displays viewed from 10 feet away. Think huge text, high contrast.
-
-**Screens to build:**
-1. **Lobby screen** — shows room code (big), QR code to join, player avatars popping in as they join
-2. **"Take your photos!" screen** — prompt text shown to everyone, countdown timer, submission status (who has submitted, shown as checkmarks — not what they submitted)
-3. **Reveal screen** — shows two photos side by side (or stacked) for each matchup. Big, dramatic reveal animation
-4. **Voting screen** — photos visible, players vote on phones, live vote tally could be hidden until reveal
-5. **Scores screen** — leaderboard with vote breakdown, whose photo got the most votes
-6. **Final screen** — winner celebration
-
-**QR Code:** Generate a QR code pointing to `https://yourdomain.com/join/XKCD` so players can join without typing. Use the `qrcode` Python package — generate it server-side and serve as a PNG or inline SVG.
-
----
-
-## Phase 7 — Phone UI
-
-The phone interface lives at `/room/:code/join`. It needs to be a slick mobile web experience.
-
-**Phone screens:**
-1. **Join screen** — enter name, pick avatar color
-2. **Lobby waiting** — "Waiting for host to start..."
-3. **Prompt screen** — shows the prompt text, big camera button, optional caption field, submit button
-4. **Submission confirmed** — "Photo submitted! Wait for voting..."
-5. **Voting screen** — shows two photos, tap to vote, can't vote for yourself
-6. **Results screen** — shows how many votes you got this round
-
-**Camera integration:**
-```html
-<input type="file" accept="image/*" capture="environment" />
-```
-This single HTML attribute opens the native camera on iOS and Android. No app needed.
-
-**IMPORTANT UX detail:** Compress the image client-side before uploading using the `browser-image-compression` library. Don't make players wait 30 seconds for a 15MB photo to upload on hotel WiFi.
-
----
-
-## Phase 8 — Prompt Bank
-
-You need a library of prompts designed for photos, not text. These are fundamentally different from Quiplash prompts.
-
-**Photo prompt categories:**
-- **"Show us..."** — "Show us the most chaotic thing in your immediate area"
-- **"Find something that..."** — "Find something that looks like it's judging you"
-- **"Recreate..."** — "Recreate a Renaissance painting with objects nearby"
-- **"Photo that best represents..."** — "A photo that best represents your Monday morning"
-- **"Caption challenge"** — show a weird stock photo, players submit their own photo response
-
-Store prompts in a JSON file to start. Later you can add a database table with categories, difficulty, NSFW flags, etc.
-
----
-
-## Phase 9 — Hosting & Infrastructure
-
-### Development
-- Run Flask dev server locally (`flask run` or `python app.py`)
-- Use `ngrok` to expose localhost so phones on your WiFi can connect during testing
-
-### Production (cheapest viable path)
-- **Fly.io** — $5/month for a persistent server with WebSocket support, easy deploys
-- **Cloudflare R2** — free tier covers millions of image requests, $0.015/GB stored
-- **Cloudflare CDN** — put in front of image URLs so photos load fast on the TV
-
-### Domain
-- Single domain, everything on it
-- `/` — landing/marketing page
-- `/join` — phone entry point
-- `/host` — create a room
-- `/room/:code/tv` — TV display
-- `/room/:code/phone` — phone interface
-
----
-
-## Phase 10 — Security & Edge Cases
-
-These will bite you if ignored:
-
-| Problem | Solution |
+| File | Responsibility |
 |---|---|
-| Players submitting after window closes | Server validates timestamp on every submission |
-| Someone joining mid-game | Allow spectator mode, or queue them for next round |
-| Phone loses connection | Socket.io auto-reconnects, server preserves player state by name+roomCode |
-| Player uploads NSFW photo | Start with trust, add optional content moderation (AWS Rekognition) later |
-| Room code collision | Generate 4-letter codes, check for collisions before returning |
-| 50 people in a room | Limit room size (8-10 is sweet spot), enforce server-side |
-| TV browser refreshes | TV re-joins room by code, server replays current state |
-| Same person voting twice | Track votes server-side by playerId, not client |
+| `backend/app.py` | Flask routes, socket event handlers, upload endpoint |
+| `backend/game.py` | `assign_prompts`, `advance_state`, `start_game`, `tally_scores`, timer helpers |
+| `backend/rooms.py` | In-memory room CRUD, `get_room_state` serialiser |
+| `backend/bots.py` | Bot players for `make devtest` — auto-submit and auto-vote |
+| `backend/prompts.json` | Bank of 24 photo prompts |
+| `frontend/src/pages/TV.jsx` | All TV screens (lobby, submitting, voting, scores, final) |
+| `frontend/src/pages/Phone.jsx` | All phone screens (join, lobby, submitting, voting, scores, final) |
+| `frontend/src/pages/Home.jsx` | Create room / enter room code / host-or-player toggle |
+| `frontend/src/socket.js` | Shared socket.io-client singleton |
 
 ---
 
-## Implementation Order (MVP to Polished)
+## Sprint Status
 
-### Sprint 1 — Skeleton (get anything working end-to-end)
-- [ ] Server with one Socket.io room
-- [ ] TV page joins room, phone page joins room
-- [ ] Both see each other's messages in real time
-- [ ] Basic room code system
+### Sprint 1 — Skeleton ✅
+- Flask + React project scaffolding
+- Room creation, 4-letter codes
+- TV and phone join the same room via WebSocket
+- Player list syncs in real time
 
-### Sprint 2 — Core Game Loop
-- [ ] Lobby → game start
-- [ ] Prompt assignment (hard-code 1 round, 1 prompt)
-- [ ] Photo upload endpoint + `Pillow` resizing
-- [ ] Phone can submit a photo
-- [ ] TV shows submitted photos
-- [ ] Voting works
-- [ ] Score tally
+### Sprint 2 — Core Game Loop ✅
+- Host joins from phone; Start Game button requires ≥2 players
+- Prompt assignment (3 prompts, 2 players each)
+- Photo upload endpoint + Pillow server-side resize
+- Multi-prompt submission phase (90s, all prompts active simultaneously)
+- Voting phase per prompt (30s)
+- Scores screen shows competing photos + round winner (10s)
+- Final leaderboard
+- QR code in lobby (resolves local network IP automatically)
+- Socket reconnection with state restore
+- Bot players for local testing (`make devtest`)
+- Full test suite: 111 backend (pytest) + 73 frontend (vitest)
 
-### Sprint 3 — Full Game Flow
-- [ ] Multiple rounds
-- [ ] Timer system
-- [ ] Proper state machine
-- [ ] Leaderboard/final results
+### Sprint 3 — Polish (planned)
+- Animations: dramatic photo reveal, score delta pop-in
+- Sound effects
+- Mobile UI polish (large tap targets, no zoom on input focus)
+- Room cleanup after session ends
 
-### Sprint 4 — Polish
-- [ ] QR code on lobby screen
-- [ ] Animations (TV reveal is a big moment — make it feel good)
-- [ ] Client-side image compression
-- [ ] Reconnection handling
-- [ ] Mobile UI polish (large tap targets, no zoom on input focus)
-
-### Sprint 5 — Production Readiness
-- [ ] Deploy to Fly.io
-- [ ] Move image storage to R2/S3
-- [ ] Room cleanup (delete rooms + images after 2 hours)
-- [ ] Rate limiting on uploads
-- [ ] Error handling + user-facing error messages
-
----
-
-## Key Libraries Summary
-
-```python
-# Backend (pip packages)
-flask
-flask-socketio
-eventlet            # async worker for Flask-SocketIO
-pillow              # image resizing
-sqlalchemy          # ORM
-flask-sqlalchemy    # SQLAlchemy integration for Flask
-qrcode[pil]        # QR code generation, server-side
-nanoid              # room code generation (or just use secrets.token_hex)
-
-# Frontend (npm packages)
-react + vite
-socket.io-client
-browser-image-compression   # client-side compression before upload
-```
-
----
-
-## What Makes This Fun (Design Notes)
-
-The hardest part isn't the code — it's making the game feel alive. A few things that matter a lot:
-
-1. **The reveal is everything.** Build the "da-da-da-DUM" moment where photos are shown one at a time with a dramatic reveal. Sound effects help enormously.
-2. **Show progress on the TV.** Showing "3/6 players submitted" as checkmarks builds anticipation without spoiling what people submitted.
-3. **Captions are optional but powerful.** Letting players add a short caption to their photo adds a comedy layer on top of the image.
-4. **Keep rounds short.** 60 seconds to submit, 30 seconds to vote. The game dies if people are waiting.
-5. **"Quiplash" mechanic:** Assign the same prompt to exactly 2 players so there's a direct head-to-head comparison. Much funnier than open voting.
+### Sprint 4 — Production (planned)
+- Deploy to Fly.io
+- Move image storage to Cloudflare R2 or AWS S3
+- Rate limiting on uploads
+- Optional NSFW content moderation
