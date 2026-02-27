@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, act } from "@testing-library/react";
+import { render, screen, act, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import TV from "../pages/TV";
 
@@ -42,6 +42,9 @@ function renderTV(code = "ABCD") {
 beforeEach(() => {
   vi.clearAllMocks();
   Object.keys(socketListeners).forEach((k) => delete socketListeners[k]);
+  // Keep the fetch pending by default so the async IP resolution never fires a
+  // state update outside act() in tests that don't care about the resolved IP.
+  vi.spyOn(global, "fetch").mockImplementation(() => new Promise(() => {}));
 });
 
 // ---------------------------------------------------------------------------
@@ -221,9 +224,21 @@ describe("TV lobby QR code", () => {
     expect(screen.getByTestId("qr-code")).toBeInTheDocument();
   });
 
-  it("encodes the phone join URL for the room code", () => {
+  it("encodes the phone join URL for the room code", async () => {
     renderTV("ABCD");
-    expect(screen.getByTestId("qr-code").dataset.value).toContain("/room/ABCD/phone");
+    await waitFor(() => {
+      expect(screen.getByTestId("qr-code").dataset.value).toContain("/room/ABCD/phone");
+    });
+  });
+
+  it("uses the local network IP in the QR code URL once resolved", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValueOnce({
+      json: async () => ({ local_ip: "192.168.1.100" }),
+    });
+    renderTV("ABCD");
+    await waitFor(() => {
+      expect(screen.getByTestId("qr-code").dataset.value).toContain("192.168.1.100");
+    });
   });
 
   it("shows a 'Scan to join' hint below the QR code", () => {

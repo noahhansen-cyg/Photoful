@@ -84,7 +84,17 @@ function Header({ code, connected }) {
 // ---------------------------------------------------------------------------
 
 function LobbyScreen({ players, code }) {
-  const joinUrl = `${window.location.protocol}//${window.location.host}/room/${code}/phone`;
+  const [localIp, setLocalIp] = useState(null);
+  useEffect(() => {
+    fetch("/api/server-info")
+      .then(r => r.json())
+      .then(data => setLocalIp(data.local_ip))
+      .catch(() => {}); // fall back to window.location.host on error
+  }, []);
+
+  const port    = window.location.port ? `:${window.location.port}` : "";
+  const host    = localIp ? `${localIp}${port}` : window.location.host;
+  const joinUrl = `${window.location.protocol}//${host}/room/${code}/phone`;
   return (
     <div style={styles.centered}>
       <div style={styles.lobbyLayout}>

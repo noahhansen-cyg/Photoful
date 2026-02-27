@@ -5,6 +5,7 @@ import uuid
 import random
 import logging
 import os
+import socket
 from flask import Flask, request, jsonify, send_from_directory
 from flask_socketio import SocketIO, emit, join_room
 from flask_cors import CORS
@@ -41,8 +42,29 @@ AVATAR_COLORS = [
 
 
 # ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def get_local_ip():
+    """Return the machine's LAN IP (the interface used to reach the internet)."""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "localhost"
+
+
+# ---------------------------------------------------------------------------
 # REST routes
 # ---------------------------------------------------------------------------
+
+@app.route("/api/server-info")
+def server_info():
+    return jsonify({"local_ip": get_local_ip()})
+
 
 @app.route("/api/rooms", methods=["POST"])
 def create_room():
