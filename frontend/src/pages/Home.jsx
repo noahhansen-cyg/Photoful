@@ -3,7 +3,6 @@ import { useNavigate } from "react-router-dom";
 
 export default function Home() {
   const [joinCode, setJoinCode] = useState("");
-  const [role, setRole]         = useState("player"); // "player" | "host"
   const [error, setError]       = useState("");
   const [loading, setLoading]   = useState(false);
   const navigate = useNavigate();
@@ -35,7 +34,7 @@ export default function Home() {
         setError(`Room "${code}" not found.`);
         return;
       }
-      navigate(`/room/${code}/phone`, { state: { role } });
+      navigate(`/room/${code}/phone`);
     } catch {
       setError("Failed to check room. Is the server running?");
     } finally {
@@ -64,25 +63,8 @@ export default function Home() {
           maxLength={4}
         />
 
-        <div style={styles.roleToggle}>
-          <button
-            type="button"
-            style={role === "player" ? styles.roleActive : styles.roleInactive}
-            onClick={() => setRole("player")}
-          >
-            Player
-          </button>
-          <button
-            type="button"
-            style={role === "host" ? styles.roleActive : styles.roleInactive}
-            onClick={() => setRole("host")}
-          >
-            Host
-          </button>
-        </div>
-
         <button style={styles.secondaryBtn} type="submit" disabled={loading}>
-          {loading ? "Joining..." : role === "host" ? "Join as Host" : "Join as Player"}
+          {loading ? "Joining..." : "Join Game"}
         </button>
       </form>
 
@@ -128,24 +110,6 @@ const styles = {
     textAlign: "center",
     letterSpacing: "0.2em",
     width: "140px",
-  },
-  roleToggle: { display: "flex", borderRadius: "8px", overflow: "hidden", border: "2px solid #6c63ff" },
-  roleActive: {
-    padding: "0.6rem 1.1rem",
-    fontSize: "0.95rem",
-    background: "#6c63ff",
-    color: "#fff",
-    border: "none",
-    cursor: "pointer",
-    fontWeight: "bold",
-  },
-  roleInactive: {
-    padding: "0.6rem 1.1rem",
-    fontSize: "0.95rem",
-    background: "transparent",
-    color: "#aaa",
-    border: "none",
-    cursor: "pointer",
   },
   secondaryBtn: {
     padding: "0.75rem 1.5rem",

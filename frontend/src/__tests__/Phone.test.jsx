@@ -96,7 +96,8 @@ describe("Phone joining", () => {
     await userEvent.type(screen.getByPlaceholderText(/your name/i), "Alice");
     await userEvent.click(screen.getByRole("button", { name: /join game/i }));
 
-    expect(screen.getByText(/waiting for host/i)).toBeInTheDocument();
+    // No host yet → lobby shows Become Host button
+    expect(screen.getByRole("button", { name: /become host/i })).toBeInTheDocument();
   });
 
   it("does not join if name is blank", async () => {
@@ -104,7 +105,7 @@ describe("Phone joining", () => {
     await userEvent.click(screen.getByRole("button", { name: /join game/i }));
 
     expect(mockSocket.emit).not.toHaveBeenCalled();
-    expect(screen.queryByText(/waiting for host/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /become host/i })).not.toBeInTheDocument();
   });
 
   it("does not join if name is only whitespace", async () => {
@@ -224,38 +225,6 @@ describe("Phone error handling", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Host role — name entry screen
-// ---------------------------------------------------------------------------
-
-function renderPhoneAsHost(code = "ABCD") {
-  return render(
-    <MemoryRouter initialEntries={[{ pathname: `/room/${code}/phone`, state: { role: "host" } }]}>
-      <Routes>
-        <Route path="/room/:code/phone" element={<Phone />} />
-      </Routes>
-    </MemoryRouter>
-  );
-}
-
-describe("Phone host role — name entry", () => {
-  it("shows Join as Host button when role is host", () => {
-    renderPhoneAsHost();
-    expect(screen.getByRole("button", { name: /join as host/i })).toBeInTheDocument();
-  });
-
-  it("emits player:join with role host after submitting", async () => {
-    renderPhoneAsHost("ABCD");
-    await userEvent.type(screen.getByPlaceholderText(/your name/i), "Eve");
-    await userEvent.click(screen.getByRole("button", { name: /join as host/i }));
-    expect(mockSocket.emit).toHaveBeenCalledWith("player:join", {
-      room_code: "ABCD",
-      name: "Eve",
-      role: "host",
-    });
-  });
-});
-
-// ---------------------------------------------------------------------------
 // player:self event
 // ---------------------------------------------------------------------------
 
@@ -273,23 +242,90 @@ describe("Phone player:self event", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Become Host button
+// ---------------------------------------------------------------------------
+
+describe("Phone Become Host button", () => {
+  async function joinAs(name) {
+    renderPhone("ABCD");
+    await userEvent.type(screen.getByPlaceholderText(/your name/i), name);
+    await userEvent.click(screen.getByRole("button", { name: /join game/i }));
+  }
+
+  it("shows Become Host button when no host exists in the lobby", async () => {
+    await joinAs("Alice");
+    act(() => {
+      emit("game:state", {
+        state: "lobby",
+        players: [{ id: "1", name: "Alice", role: "player", avatar_color: "#FF6B6B" }],
+      });
+    });
+    expect(screen.getByRole("button", { name: /become host/i })).toBeInTheDocument();
+  });
+
+  it("emits host:claim when Become Host is clicked", async () => {
+    await joinAs("Alice");
+    act(() => {
+      emit("game:state", {
+        state: "lobby",
+        players: [{ id: "1", name: "Alice", role: "player", avatar_color: "#FF6B6B" }],
+      });
+    });
+    mockSocket.emit.mockClear();
+    await userEvent.click(screen.getByRole("button", { name: /become host/i }));
+    expect(mockSocket.emit).toHaveBeenCalledWith("host:claim", { room_code: "ABCD" });
+  });
+
+  it("hides Become Host button when game:state includes a host", async () => {
+    await joinAs("Alice");
+    act(() => {
+      emit("game:state", {
+        state: "lobby",
+        players: [
+          { id: "1", name: "Alice", role: "player", avatar_color: "#FF6B6B" },
+          { id: "2", name: "Eve",   role: "host",   avatar_color: "#4ECDC4" },
+        ],
+      });
+    });
+    expect(screen.queryByRole("button", { name: /become host/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/waiting for host/i)).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Host lobby
 // ---------------------------------------------------------------------------
 
 describe("Phone host lobby", () => {
-  async function joinAsHost() {
-    renderPhoneAsHost("ABCD");
+  async function joinAndBecomeHost() {
+    renderPhone("ABCD");
     await userEvent.type(screen.getByPlaceholderText(/your name/i), "Eve");
-    await userEvent.click(screen.getByRole("button", { name: /join as host/i }));
+    await userEvent.click(screen.getByRole("button", { name: /join game/i }));
+    // Lobby with no host yet
+    act(() => {
+      emit("game:state", {
+        state: "lobby",
+        players: [{ id: "p1", name: "Eve", role: "player", avatar_color: "#4ECDC4" }],
+      });
+    });
+    // Click Become Host → server responds with player:self + updated game:state
+    await userEvent.click(screen.getByRole("button", { name: /become host/i }));
+    act(() => { emit("player:self", { player_id: "p1", role: "host" }); });
+    act(() => {
+      emit("game:state", {
+        state: "lobby",
+        players: [{ id: "p1", name: "Eve", role: "host", avatar_color: "#4ECDC4" }],
+      });
+    });
   }
 
   it("shows a Start Game button for the host", async () => {
-    await joinAsHost();
+    await joinAndBecomeHost();
     expect(screen.getByRole("button", { name: /start game/i })).toBeInTheDocument();
   });
 
   it("emits host:start when Start Game is clicked", async () => {
-    await joinAsHost();
+    await joinAndBecomeHost();
     mockSocket.emit.mockClear();
     await userEvent.click(screen.getByRole("button", { name: /start game/i }));
     expect(mockSocket.emit).toHaveBeenCalledWith("host:start", { room_code: "ABCD" });

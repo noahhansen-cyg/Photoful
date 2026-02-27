@@ -1,35 +1,38 @@
 import { useEffect, useState, useRef } from "react";
-import { useParams, useLocation } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import imageCompression from "browser-image-compression";
 import socket from "../socket";
 
 export default function Phone() {
-  const { code }    = useParams();
-  const location    = useLocation();
-  const initialRole = location.state?.role ?? "player";
+  const { code } = useParams();
 
-  const [name, setName]           = useState("");
-  const [joined, setJoined]       = useState(false);
-  const [myPlayerId, setMyPlayerId] = useState(null);
-  const [myRole, setMyRole]       = useState(initialRole);
-  const [gameState, setGameState] = useState(null);
-  const [error, setError]         = useState("");
-  const [timeLeft, setTimeLeft]   = useState(null);
-  const timerRef                  = useRef(null);
+  const [name, setName]             = useState("");
+  const [joined, setJoined]         = useState(false);
+  const [myPlayerId, setMyPlayerId]  = useState(null);
+  const [myRole, setMyRole]         = useState("player");
+  const [gameState, setGameState]   = useState(null);
+  const [error, setError]           = useState("");
+  const [timeLeft, setTimeLeft]     = useState(null);
+  const timerRef                    = useRef(null);
+  // Keep role in a ref so reconnect handler always uses the current value
+  // (the useEffect closure would otherwise capture the stale "player" role
+  // if the player later claims host).
+  const roleRef = useRef("player");
 
   // Wire up socket after joining
   useEffect(() => {
     if (!joined) return;
     socket.connect();
-    socket.emit("player:join", { room_code: code, name, role: myRole });
+    socket.emit("player:join", { room_code: code, name, role: "player" });
 
     socket.on("connect", () => {
       // Re-join room on reconnect — server-side room membership is lost on disconnect
-      socket.emit("player:join", { room_code: code, name, role: myRole });
+      socket.emit("player:join", { room_code: code, name, role: roleRef.current });
     });
     socket.on("player:self", ({ player_id, role }) => {
       setMyPlayerId(player_id);
       setMyRole(role);
+      roleRef.current = role;
     });
     socket.on("game:state", setGameState);
     socket.on("error", ({ message }) => setError(message));
@@ -81,7 +84,7 @@ export default function Phone() {
             autoFocus
           />
           <button style={styles.btn} type="submit">
-            {initialRole === "host" ? "Join as Host" : "Join Game"}
+            Join Game
           </button>
         </form>
         {error && <p style={styles.error}>{error}</p>}
@@ -117,36 +120,50 @@ export default function Phone() {
 // ---------------------------------------------------------------------------
 
 function LobbyScreen({ myRole, players, code, name }) {
+  const hasHost    = players.some(p => p.role === "host");
+  const others     = players.filter(p => p.name !== name);
+  const totalPlayers = players.length;
+
   function startGame() {
     socket.emit("host:start", { room_code: code });
   }
 
-  const others = players.filter(p => p.name !== name);
-  const totalPlayers = players.length;
+  function becomeHost() {
+    socket.emit("host:claim", { room_code: code });
+  }
+
+  if (myRole === "host") {
+    return (
+      <div style={styles.section}>
+        <p style={styles.label}>{totalPlayers} player{totalPlayers !== 1 ? "s" : ""} ready</p>
+        <button style={styles.bigBtn} onClick={startGame}>
+          Start Game
+        </button>
+        <p style={styles.hint}>Need at least 2 players</p>
+      </div>
+    );
+  }
 
   return (
     <div style={styles.section}>
-      {myRole === "host" ? (
-        <>
-          <p style={styles.label}>{totalPlayers} player{totalPlayers !== 1 ? "s" : ""} ready</p>
-          <button style={styles.bigBtn} onClick={startGame}>
-            Start Game
-          </button>
-          <p style={styles.hint}>Need at least 2 players</p>
-        </>
+      {hasHost ? (
+        <p style={styles.label}>Waiting for host to start...</p>
       ) : (
         <>
-          <p style={styles.label}>Waiting for host to start...</p>
-          <div style={styles.playerList}>
-            {others.map(p => (
-              <div key={p.id} style={styles.playerRow}>
-                <div style={{ ...styles.dot, background: p.avatar_color }} />
-                <span>{p.name}</span>
-              </div>
-            ))}
-          </div>
+          <p style={styles.label}>No host yet</p>
+          <button style={styles.bigBtn} onClick={becomeHost}>
+            Become Host
+          </button>
         </>
       )}
+      <div style={styles.playerList}>
+        {others.map(p => (
+          <div key={p.id} style={styles.playerRow}>
+            <div style={{ ...styles.dot, background: p.avatar_color }} />
+            <span>{p.name}</span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
