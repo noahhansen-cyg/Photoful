@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from "react";
 import { useParams } from "react-router-dom";
+import { QRCodeSVG } from "qrcode.react";
 import socket from "../socket";
 
 export default function TV() {
@@ -13,7 +14,11 @@ export default function TV() {
     socket.connect();
     socket.emit("player:join", { room_code: code, name: "TV", role: "tv" });
 
-    socket.on("connect",    () => setConnected(true));
+    socket.on("connect", () => {
+      setConnected(true);
+      // Re-join room on reconnect — server-side room membership is lost on disconnect
+      socket.emit("player:join", { room_code: code, name: "TV", role: "tv" });
+    });
     socket.on("disconnect", () => setConnected(false));
     socket.on("game:state", (state) => setGameState(state));
 
@@ -45,7 +50,7 @@ export default function TV() {
     <div style={styles.page}>
       <Header code={code} connected={connected} />
       <div style={styles.body}>
-        {state === "lobby"      && <LobbyScreen players={players} />}
+        {state === "lobby"      && <LobbyScreen players={players} code={code} />}
         {state === "submitting" && <SubmittingScreen gameState={gameState} players={players} timeLeft={timeLeft} />}
         {state === "voting"     && <VotingScreen gameState={gameState} players={players} timeLeft={timeLeft} />}
         {state === "scores"     && <ScoresScreen gameState={gameState} players={players} />}
@@ -78,18 +83,33 @@ function Header({ code, connected }) {
 // Lobby
 // ---------------------------------------------------------------------------
 
-function LobbyScreen({ players }) {
+function LobbyScreen({ players, code }) {
+  const joinUrl = `${window.location.protocol}//${window.location.host}/room/${code}/phone`;
   return (
     <div style={styles.centered}>
-      <h2 style={styles.bigLabel}>
-        {players.length === 0
-          ? "Waiting for players to join..."
-          : `${players.length} player${players.length !== 1 ? "s" : ""} in the lobby`}
-      </h2>
-      <div style={styles.playerGrid}>
-        {players.map(p => <PlayerAvatar key={p.id} player={p} />)}
+      <div style={styles.lobbyLayout}>
+        <div style={styles.qrSection}>
+          <QRCodeSVG
+            value={joinUrl}
+            size={220}
+            bgColor="#1a1a2e"
+            fgColor="#ffffff"
+            level="M"
+          />
+          <p style={styles.qrHint}>Scan to join</p>
+        </div>
+        <div style={styles.playerSection}>
+          <h2 style={styles.bigLabel}>
+            {players.length === 0
+              ? "Waiting for players to join..."
+              : `${players.length} player${players.length !== 1 ? "s" : ""} in the lobby`}
+          </h2>
+          <div style={styles.playerGrid}>
+            {players.map(p => <PlayerAvatar key={p.id} player={p} />)}
+          </div>
+          <p style={styles.hint}>One player should join as Host to start the game</p>
+        </div>
       </div>
-      <p style={styles.hint}>One player should join as Host to start the game</p>
     </div>
   );
 }
@@ -111,7 +131,7 @@ function SubmittingScreen({ gameState, players, timeLeft }) {
       <h2 style={styles.bigLabel}>Players are taking photos...</h2>
       <TimerBar timeLeft={timeLeft} total={60} />
       <div style={styles.playerGrid}>
-        {players.filter(p => p.role === "player").map(p => (
+        {players.map(p => (
           <div key={p.id} style={styles.checkCard}>
             <PlayerAvatar player={p} dim={!assigned.has(p.id)} />
             <div style={styles.checkmark(p.id in submissions)}>
@@ -171,7 +191,7 @@ function VotingScreen({ gameState, players, timeLeft }) {
 function ScoresScreen({ gameState, players }) {
   const prompt = gameState?.current_prompt;
   const deltas = prompt?.score_deltas ?? {};
-  const sorted = [...players].filter(p => p.role === "player").sort((a, b) => b.score - a.score);
+  const sorted = [...players].sort((a, b) => b.score - a.score);
 
   return (
     <div style={styles.centered}>
@@ -198,7 +218,7 @@ function ScoresScreen({ gameState, players }) {
 // ---------------------------------------------------------------------------
 
 function FinalScreen({ players }) {
-  const sorted = [...players].filter(p => p.role === "player").sort((a, b) => b.score - a.score);
+  const sorted = [...players].sort((a, b) => b.score - a.score);
   const winner = sorted[0];
 
   return (
@@ -299,6 +319,11 @@ const styles = {
   leaderName:  { flex: 1, fontSize: "1.1rem" },
   delta:       { fontSize: "1rem", color: "#4ecdc4", fontWeight: "bold" },
   score:       { fontSize: "1.2rem", fontWeight: "bold", color: "#6c63ff" },
+
+  lobbyLayout:   { display: "flex", gap: "4rem", alignItems: "center", flexWrap: "wrap", justifyContent: "center" },
+  qrSection:     { display: "flex", flexDirection: "column", alignItems: "center", gap: "0.75rem", background: "#1a1a2e", borderRadius: 16, padding: "1.5rem", border: "2px solid #2d2d44" },
+  qrHint:        { color: "#aaa", fontSize: "0.95rem", margin: 0 },
+  playerSection: { display: "flex", flexDirection: "column", alignItems: "center", gap: "1.5rem" },
 
   crownEmoji:  { fontSize: "5rem" },
   winnerName:  { fontSize: "2rem", color: "#6c63ff", fontWeight: "bold", margin: 0 },

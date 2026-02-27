@@ -176,3 +176,30 @@ describe("Join Room", () => {
     expect(mockNavigate).not.toHaveBeenCalled();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Role toggle
+// ---------------------------------------------------------------------------
+
+describe("Role toggle", () => {
+  it("changes the join button text to Join as Host when Host is selected", async () => {
+    renderHome();
+    await userEvent.click(screen.getByRole("button", { name: /^host$/i }));
+    expect(screen.getByRole("button", { name: /join as host/i })).toBeInTheDocument();
+  });
+
+  it("navigates with role host in location state when joining as Host", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValueOnce({
+      json: async () => ({ exists: true }),
+    });
+
+    renderHome();
+    await userEvent.click(screen.getByRole("button", { name: /^host$/i }));
+    await userEvent.type(screen.getByPlaceholderText(/room code/i), "ABCD");
+    await userEvent.click(screen.getByRole("button", { name: /join as host/i }));
+
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith("/room/ABCD/phone", { state: { role: "host" } });
+    });
+  });
+});

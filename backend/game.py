@@ -69,7 +69,7 @@ def all_voted(prompt, connected_players):
     """
     competing = set(prompt["player_ids"])
     eligible = [p for p in connected_players
-                if p["id"] not in competing and p["role"] == "player"]
+                if p["id"] not in competing and p["role"] in ("player", "host")]
     if not eligible:
         return True
     return all(p["id"] in prompt["votes"] for p in eligible)
@@ -151,7 +151,7 @@ def start_game(room_code, socketio):
         return False
 
     players = [p for p in room["players"]
-               if p["is_connected"] and p["role"] == "player"]
+               if p["is_connected"] and p["role"] in ("player", "host")]
     if len(players) < 2:
         return False
 

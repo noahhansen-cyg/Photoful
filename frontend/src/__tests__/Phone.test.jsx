@@ -222,3 +222,179 @@ describe("Phone error handling", () => {
     expect(screen.getByText(/room abcd not found/i)).toBeInTheDocument();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Host role — name entry screen
+// ---------------------------------------------------------------------------
+
+function renderPhoneAsHost(code = "ABCD") {
+  return render(
+    <MemoryRouter initialEntries={[{ pathname: `/room/${code}/phone`, state: { role: "host" } }]}>
+      <Routes>
+        <Route path="/room/:code/phone" element={<Phone />} />
+      </Routes>
+    </MemoryRouter>
+  );
+}
+
+describe("Phone host role — name entry", () => {
+  it("shows Join as Host button when role is host", () => {
+    renderPhoneAsHost();
+    expect(screen.getByRole("button", { name: /join as host/i })).toBeInTheDocument();
+  });
+
+  it("emits player:join with role host after submitting", async () => {
+    renderPhoneAsHost("ABCD");
+    await userEvent.type(screen.getByPlaceholderText(/your name/i), "Eve");
+    await userEvent.click(screen.getByRole("button", { name: /join as host/i }));
+    expect(mockSocket.emit).toHaveBeenCalledWith("player:join", {
+      room_code: "ABCD",
+      name: "Eve",
+      role: "host",
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// player:self event
+// ---------------------------------------------------------------------------
+
+describe("Phone player:self event", () => {
+  it("updates the displayed role when server assigns host", async () => {
+    renderPhone();
+    await userEvent.type(screen.getByPlaceholderText(/your name/i), "Alice");
+    await userEvent.click(screen.getByRole("button", { name: /join game/i }));
+
+    act(() => { emit("player:self", { player_id: "p1", role: "host" }); });
+
+    // Name badge shows crown for host role
+    expect(screen.getByText(/👑/)).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Host lobby
+// ---------------------------------------------------------------------------
+
+describe("Phone host lobby", () => {
+  async function joinAsHost() {
+    renderPhoneAsHost("ABCD");
+    await userEvent.type(screen.getByPlaceholderText(/your name/i), "Eve");
+    await userEvent.click(screen.getByRole("button", { name: /join as host/i }));
+  }
+
+  it("shows a Start Game button for the host", async () => {
+    await joinAsHost();
+    expect(screen.getByRole("button", { name: /start game/i })).toBeInTheDocument();
+  });
+
+  it("emits host:start when Start Game is clicked", async () => {
+    await joinAsHost();
+    mockSocket.emit.mockClear();
+    await userEvent.click(screen.getByRole("button", { name: /start game/i }));
+    expect(mockSocket.emit).toHaveBeenCalledWith("host:start", { room_code: "ABCD" });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Voting screen
+// ---------------------------------------------------------------------------
+
+describe("Phone voting screen", () => {
+  async function joinAndVote() {
+    renderPhone("ABCD");
+    await userEvent.type(screen.getByPlaceholderText(/your name/i), "Carol");
+    await userEvent.click(screen.getByRole("button", { name: /join game/i }));
+    // Carol is not competing (player_ids = p1, p2) → sees vote cards
+    act(() => {
+      emit("game:state", {
+        state: "voting",
+        current_prompt: {
+          prompt_id: "pid-1",
+          player_ids: ["p1", "p2"],
+          submissions: {},
+          votes: {},
+          prompt_text: "Best photo?",
+        },
+        players: [
+          { id: "p1", name: "Alice", role: "player", avatar_color: "#FF6B6B" },
+          { id: "p2", name: "Bob",   role: "player", avatar_color: "#4ECDC4" },
+        ],
+      });
+    });
+  }
+
+  it("shows a vote card for each competing player", async () => {
+    await joinAndVote();
+    expect(screen.getByText("Alice")).toBeInTheDocument();
+    expect(screen.getByText("Bob")).toBeInTheDocument();
+  });
+
+  it("emits submit:vote with the chosen player when a vote card is clicked", async () => {
+    await joinAndVote();
+    mockSocket.emit.mockClear();
+    await userEvent.click(screen.getByText("Alice").closest("button"));
+    expect(mockSocket.emit).toHaveBeenCalledWith("submit:vote", {
+      room_code: "ABCD",
+      prompt_id: "pid-1",
+      voted_for_id: "p1",
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Scores screen
+// ---------------------------------------------------------------------------
+
+describe("Phone scores screen", () => {
+  it("shows a personal points delta when the player earned points", async () => {
+    renderPhone();
+    await userEvent.type(screen.getByPlaceholderText(/your name/i), "Alice");
+    await userEvent.click(screen.getByRole("button", { name: /join game/i }));
+
+    act(() => { emit("player:self", { player_id: "p1", role: "player" }); });
+    act(() => {
+      emit("game:state", {
+        state: "scores",
+        current_prompt: { score_deltas: { "p1": 1000 } },
+        players: [
+          { id: "p1", name: "Alice", role: "player", avatar_color: "#FF6B6B", score: 1000 },
+          { id: "p2", name: "Bob",   role: "player", avatar_color: "#4ECDC4", score: 0 },
+        ],
+      });
+    });
+
+    // Matches "+1,000 pts!" or "+1000 pts!" depending on locale
+    expect(screen.getByText(/\+.+pts/i)).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Final screen
+// ---------------------------------------------------------------------------
+
+describe("Phone final screen", () => {
+  async function joinAndFinal(myId, players) {
+    renderPhone();
+    await userEvent.type(screen.getByPlaceholderText(/your name/i), "Alice");
+    await userEvent.click(screen.getByRole("button", { name: /join game/i }));
+    act(() => { emit("player:self", { player_id: myId, role: "player" }); });
+    act(() => { emit("game:state", { state: "final", players }); });
+  }
+
+  it("shows You won! when the player is the winner", async () => {
+    await joinAndFinal("p1", [
+      { id: "p1", name: "Alice", role: "player", avatar_color: "#FF6B6B", score: 1000 },
+      { id: "p2", name: "Bob",   role: "player", avatar_color: "#4ECDC4", score: 500 },
+    ]);
+    expect(screen.getByText(/you won/i)).toBeInTheDocument();
+  });
+
+  it("shows the winner's name when the player did not win", async () => {
+    await joinAndFinal("p2", [
+      { id: "p1", name: "Alice", role: "player", avatar_color: "#FF6B6B", score: 1000 },
+      { id: "p2", name: "Bob",   role: "player", avatar_color: "#4ECDC4", score: 500 },
+    ]);
+    expect(screen.getByText(/alice wins/i)).toBeInTheDocument();
+  });
+});

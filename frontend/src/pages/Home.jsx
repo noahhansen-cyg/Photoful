@@ -64,25 +64,22 @@ export default function Home() {
           maxLength={4}
         />
 
-        {/* Role toggle — shown once a code is entered */}
-        {joinCode.length > 0 && (
-          <div style={styles.roleToggle}>
-            <button
-              type="button"
-              style={role === "player" ? styles.roleActive : styles.roleInactive}
-              onClick={() => setRole("player")}
-            >
-              Player
-            </button>
-            <button
-              type="button"
-              style={role === "host" ? styles.roleActive : styles.roleInactive}
-              onClick={() => setRole("host")}
-            >
-              Host
-            </button>
-          </div>
-        )}
+        <div style={styles.roleToggle}>
+          <button
+            type="button"
+            style={role === "player" ? styles.roleActive : styles.roleInactive}
+            onClick={() => setRole("player")}
+          >
+            Player
+          </button>
+          <button
+            type="button"
+            style={role === "host" ? styles.roleActive : styles.roleInactive}
+            onClick={() => setRole("host")}
+          >
+            Host
+          </button>
+        </div>
 
         <button style={styles.secondaryBtn} type="submit" disabled={loading}>
           {loading ? "Joining..." : role === "host" ? "Join as Host" : "Join as Player"}
