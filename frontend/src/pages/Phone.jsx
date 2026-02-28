@@ -231,23 +231,36 @@ function SubmittingScreen({ code, allPrompts, myPlayerId, timeLeft }) {
 }
 
 function PromptSubmitCard({ code, prompt, myPlayerId }) {
-  const [imageFile, setImageFile] = useState(null);
-  const [preview, setPreview]     = useState(null);
-  const [caption, setCaption]     = useState("");
-  const [uploading, setUploading] = useState(false);
-  const [submitted, setSubmitted] = useState(false);
+  const [imageFile, setImageFile]   = useState(null);
+  const [preview, setPreview]       = useState(null);
+  const [caption, setCaption]       = useState("");
+  const [uploading, setUploading]   = useState(false);
+  const [submitted, setSubmitted]   = useState(false);
+  const [uploadError, setUploadError] = useState("");
 
   const alreadySubmitted = prompt?.submissions?.[myPlayerId];
 
   async function handleSubmit() {
     if (!imageFile || uploading) return;
     setUploading(true);
+    setUploadError("");
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30000);
     try {
       const compressed = await imageCompression(imageFile, { maxSizeMB: 1, maxWidthOrHeight: 1280 });
       const form = new FormData();
       form.append("photo", compressed, "photo.jpg");
-      const res  = await fetch(`/api/rooms/${code}/upload`, { method: "POST", body: form });
+      const res = await fetch(`/api/rooms/${code}/upload`, {
+        method: "POST",
+        body: form,
+        signal: controller.signal,
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `Upload failed (${res.status})`);
+      }
       const data = await res.json();
+      if (!data.image_url) throw new Error("No image URL returned");
       socket.emit("submit:photo", {
         room_code: code,
         prompt_id: prompt.prompt_id,
@@ -257,7 +270,9 @@ function PromptSubmitCard({ code, prompt, myPlayerId }) {
       setSubmitted(true);
     } catch (e) {
       console.error(e);
+      setUploadError(e.name === "AbortError" ? "Upload timed out — tap to try again." : "Upload failed — tap to try again.");
     } finally {
+      clearTimeout(timeout);
       setUploading(false);
     }
   }
@@ -308,6 +323,8 @@ function PromptSubmitCard({ code, prompt, myPlayerId }) {
         onChange={e => setCaption(e.target.value)}
         maxLength={80}
       />
+
+      {uploadError && <p style={styles.error}>{uploadError}</p>}
 
       <button
         style={styles.submitBtn(!!imageFile && !uploading)}
