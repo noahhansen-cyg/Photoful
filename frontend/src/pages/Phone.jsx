@@ -140,7 +140,7 @@ export default function Phone() {
       {state === "submitting" && <SubmittingScreen code={code} allPrompts={allPrompts} myPlayerId={myPlayerId} timeLeft={timeLeft} />}
       {state === "voting"     && <VotingScreen code={code} prompt={prompt} myPlayerId={myPlayerId} isAssigned={isAssigned} players={players} />}
       {state === "scores"     && <ScoresScreen gameState={gameState} players={players} myPlayerId={myPlayerId} />}
-      {state === "final"      && <FinalScreen players={players} myPlayerId={myPlayerId} />}
+      {state === "final"      && <FinalScreen players={players} myPlayerId={myPlayerId} myRole={myRole} code={code} />}
     </div>
   );
 }
@@ -435,10 +435,14 @@ function ScoresScreen({ gameState, players, myPlayerId }) {
 // Final
 // ---------------------------------------------------------------------------
 
-function FinalScreen({ players, myPlayerId }) {
+function FinalScreen({ players, myPlayerId, myRole, code }) {
   const sorted = [...players].sort((a, b) => b.score - a.score);
   const winner = sorted[0];
   const iWon   = winner?.id === myPlayerId;
+
+  function playAgain() {
+    socket.emit("host:restart", { room_code: code });
+  }
 
   return (
     <div style={styles.section}>
@@ -453,6 +457,11 @@ function FinalScreen({ players, myPlayerId }) {
           </div>
         ))}
       </div>
+      {myRole === "host" && (
+        <button style={styles.bigBtn} onClick={playAgain}>
+          Play Again?
+        </button>
+      )}
     </div>
   );
 }

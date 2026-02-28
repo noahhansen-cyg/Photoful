@@ -134,6 +134,24 @@ def get_room_state(code):
     }
 
 
+def reset_room(code):
+    """
+    Reset a finished room back to lobby so the same players can play again.
+    Scores are zeroed; players, roles, and host assignment are preserved.
+    """
+    room = rooms.get(code)
+    if not room:
+        return False
+    room["state"]               = "lobby"
+    room["prompts"]             = []
+    room["current_prompt_idx"]  = 0
+    room["timer_end"]           = None
+    room["timer_greenlet"]      = None
+    for p in room["players"]:
+        p["score"] = 0
+    return True
+
+
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------

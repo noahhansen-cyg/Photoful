@@ -292,6 +292,7 @@ function FinalScreen({ players }) {
           </div>
         ))}
       </div>
+      <p style={styles.hint}>Host can tap "Play Again?" on their phone to restart</p>
     </div>
   );
 }
