@@ -6,10 +6,21 @@ import socket from "../socket";
 export default function Phone() {
   const { code } = useParams();
 
-  const [name, setName]             = useState("");
-  const [joined, setJoined]         = useState(false);
-  const [myPlayerId, setMyPlayerId]  = useState(null);
-  const [myRole, setMyRole]         = useState("player");
+  // Restore a previous session from localStorage so a page refresh rejoins
+  // automatically without sending the player back to the name-entry screen.
+  const [savedSession] = useState(() => {
+    try {
+      const raw = localStorage.getItem(`pq_session_${code}`);
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  const [name, setName]             = useState(savedSession?.name ?? "");
+  const [joined, setJoined]         = useState(!!savedSession);
+  const [myPlayerId, setMyPlayerId]  = useState(savedSession?.myPlayerId ?? null);
+  const [myRole, setMyRole]         = useState(savedSession?.myRole ?? "player");
   const [gameState, setGameState]   = useState(null);
   const [error, setError]           = useState("");
   const [timeLeft, setTimeLeft]     = useState(null);
@@ -17,25 +28,44 @@ export default function Phone() {
   // Keep role in a ref so reconnect handler always uses the current value
   // (the useEffect closure would otherwise capture the stale "player" role
   // if the player later claims host).
-  const roleRef = useRef("player");
+  const roleRef = useRef(savedSession?.myRole ?? "player");
+  // Track whether we auto-joined from localStorage so we can recover cleanly
+  // if the session is stale (e.g. server restarted, room gone).
+  const autoJoinRef = useRef(!!savedSession);
 
   // Wire up socket after joining
   useEffect(() => {
     if (!joined) return;
     socket.connect();
-    socket.emit("player:join", { room_code: code, name, role: "player" });
+    socket.emit("player:join", { room_code: code, name, role: roleRef.current });
 
     socket.on("connect", () => {
       // Re-join room on reconnect — server-side room membership is lost on disconnect
       socket.emit("player:join", { room_code: code, name, role: roleRef.current });
     });
     socket.on("player:self", ({ player_id, role }) => {
+      autoJoinRef.current = false; // rejoined successfully, clear stale-session guard
       setMyPlayerId(player_id);
       setMyRole(role);
       roleRef.current = role;
+      localStorage.setItem(`pq_session_${code}`, JSON.stringify({ name, myPlayerId: player_id, myRole: role }));
     });
     socket.on("game:state", setGameState);
-    socket.on("error", ({ message }) => setError(message));
+    socket.on("error", ({ message }) => {
+      setError(message);
+      // If we auto-joined from a saved session and got an error before receiving
+      // player:self, the session is stale (server restarted / room gone).
+      // Clear it and fall back to the name-entry screen.
+      if (autoJoinRef.current) {
+        autoJoinRef.current = false;
+        localStorage.removeItem(`pq_session_${code}`);
+        setJoined(false);
+        setName("");
+        setMyPlayerId(null);
+        setMyRole("player");
+        roleRef.current = "player";
+      }
+    });
 
     return () => {
       socket.off("connect");
