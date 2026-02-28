@@ -1,7 +1,5 @@
 # TODO
-
-- [x] Fix rejoin logic bug: when a player refreshes the app they do not (and cannot) rejoin their existing session
-- [x] Investigate upload logic: photo can get stuck in "uploading" state
-- [x] Add a "play again?" button that relaunches the game with the existing players. This should only be available to the host
-- [x] Currently, the photo immediately shows on the users phone when the voting process begins. We don't want this as their is a fade in on the tv. Make sure the photos do not show on the phone screen and voting is locked until the photos materialize
-- [x] Time in between rounds needs to be less (5s)
+- [ ] Compile the game into an executable so it's able to be run from a game launcher like steam
+- [ ] Create a main menu for the executable
+- [ ] Find a way to have online functionality. I'd like to be able to launch the game from a host device (pc) then everyone be able to join from their phone regardless of whether they are on the same network or not
+- [ ] Create a toggle that allows you to turn on local play. Local having same functionality as now, default being online. This exists so people without internet can still play the game in front of a TV with their friends
