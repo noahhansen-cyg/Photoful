@@ -63,7 +63,8 @@ def get_local_ip():
 
 @app.route("/api/server-info")
 def server_info():
-    return jsonify({"local_ip": get_local_ip()})
+    host = os.environ.get("APP_HOST") or get_local_ip()
+    return jsonify({"local_ip": host})
 
 
 @app.route("/api/rooms", methods=["POST"])
