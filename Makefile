@@ -8,16 +8,19 @@ dev:
 	  cd frontend && npm run dev & \
 	  wait
 
-# Start servers + 3 bot players for end-to-end testing without extra browser windows.
+bots ?= 3
+
+# Start servers + bot players for end-to-end testing without extra browser windows.
 # Bots create a room automatically and print the TV URL; open it in your browser.
+# Override the number of bots with bots=N (max 8): make devtest bots=5
 # Ctrl+C stops everything.
 devtest:
-	@echo "Starting backend, frontend, and 3 bot players..."
+	@echo "Starting backend, frontend, and $(bots) bot players..."
 	@echo "(Bot players will create a room and print the TV URL after ~3 s)"
 	@trap 'kill 0' INT; \
 	  (cd backend && python app.py) & \
 	  (cd frontend && npm run dev) & \
-	  (sleep 3 && cd backend && python bots.py) & \
+	  (sleep 3 && cd backend && python bots.py --count $(bots)) & \
 	  wait
 
 # Kill anything still holding the ports

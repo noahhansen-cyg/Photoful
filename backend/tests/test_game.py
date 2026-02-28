@@ -51,27 +51,67 @@ def _connected(pid, name, role="player"):
 # assign_prompts
 # ---------------------------------------------------------------------------
 
-def test_assign_prompts_returns_correct_count():
+def test_assign_prompts_two_players_returns_three_prompts():
+    """2 players → 3 total prompts (each player competes in all 3)."""
     players = _make_player_dicts(2)
-    assert len(game.assign_prompts(players, num_prompts=3)) == 3
+    assert len(game.assign_prompts(players)) == game.PROMPTS_PER_PLAYER
+
+
+def test_assign_prompts_four_players_returns_six_prompts():
+    """4 players → 6 total prompts so every player appears in exactly 3."""
+    players = _make_player_dicts(4)
+    assert len(game.assign_prompts(players)) == game.PROMPTS_PER_PLAYER * 4 // 2
+
+
+def test_assign_prompts_each_player_appears_in_three_prompts_even():
+    """For even player counts every player appears in exactly PROMPTS_PER_PLAYER prompts."""
+    for n in (2, 4, 6):
+        players = _make_player_dicts(n)
+        prompts = game.assign_prompts(players)
+        counts = {p["id"]: 0 for p in players}
+        for prompt in prompts:
+            for pid in prompt["player_ids"]:
+                counts[pid] += 1
+        for pid, count in counts.items():
+            assert count == game.PROMPTS_PER_PLAYER, (
+                f"n={n}: player {pid} appeared in {count} prompts, expected {game.PROMPTS_PER_PLAYER}"
+            )
+
+
+def test_assign_prompts_each_player_appears_in_at_least_three_prompts_odd():
+    """For odd player counts every player appears in PROMPTS_PER_PLAYER or PROMPTS_PER_PLAYER+1 prompts."""
+    for n in (3, 5):
+        players = _make_player_dicts(n)
+        prompts = game.assign_prompts(players)
+        counts = {p["id"]: 0 for p in players}
+        for prompt in prompts:
+            for pid in prompt["player_ids"]:
+                counts[pid] += 1
+        for pid, count in counts.items():
+            assert count >= game.PROMPTS_PER_PLAYER, (
+                f"n={n}: player {pid} appeared in only {count} prompts"
+            )
+            assert count <= game.PROMPTS_PER_PLAYER + 1, (
+                f"n={n}: player {pid} appeared in {count} prompts (too many)"
+            )
 
 
 def test_assign_prompts_each_assignment_has_required_keys():
     players = _make_player_dicts(2)
-    for p in game.assign_prompts(players, num_prompts=2):
+    for p in game.assign_prompts(players):
         for key in ("prompt_id", "prompt_text", "player_ids", "submissions", "votes"):
             assert key in p, f"Missing key: {key}"
 
 
 def test_assign_prompts_each_has_exactly_two_player_ids():
     players = _make_player_dicts(4)
-    for p in game.assign_prompts(players, num_prompts=3):
+    for p in game.assign_prompts(players):
         assert len(p["player_ids"]) == 2
 
 
 def test_assign_prompts_submissions_and_votes_start_empty():
     players = _make_player_dicts(2)
-    for p in game.assign_prompts(players, num_prompts=2):
+    for p in game.assign_prompts(players):
         assert p["submissions"] == {}
         assert p["votes"] == {}
 
@@ -79,7 +119,7 @@ def test_assign_prompts_submissions_and_votes_start_empty():
 def test_assign_prompts_player_ids_come_from_input_list():
     players = _make_player_dicts(4)
     valid_ids = {p["id"] for p in players}
-    for prompt in game.assign_prompts(players, num_prompts=3):
+    for prompt in game.assign_prompts(players):
         for pid in prompt["player_ids"]:
             assert pid in valid_ids
 
@@ -87,10 +127,10 @@ def test_assign_prompts_player_ids_come_from_input_list():
 def test_assign_prompts_different_prompts_selected_each_call():
     """Prompt texts should vary across calls (probabilistic — passes with overwhelming probability)."""
     players = _make_player_dicts(2)
-    texts_a = {p["prompt_text"] for p in game.assign_prompts(players, num_prompts=3)}
-    texts_b = {p["prompt_text"] for p in game.assign_prompts(players, num_prompts=3)}
-    texts_c = {p["prompt_text"] for p in game.assign_prompts(players, num_prompts=3)}
-    # At least one run should differ (all 24 prompts, picking 3 — extremely unlikely all match)
+    texts_a = {p["prompt_text"] for p in game.assign_prompts(players)}
+    texts_b = {p["prompt_text"] for p in game.assign_prompts(players)}
+    texts_c = {p["prompt_text"] for p in game.assign_prompts(players)}
+    # At least one run should differ (24 prompts, picking 3 — extremely unlikely all match)
     assert not (texts_a == texts_b == texts_c)
 
 
@@ -385,7 +425,8 @@ def test_start_game_assigns_prompts():
     mock_io = _mock_socketio()
     with patch("game._start_timer", return_value=MagicMock(dead=False)):
         game.start_game(code, mock_io)
-    assert len(rooms[code]["prompts"]) == 3
+    # 2 players → PROMPTS_PER_PLAYER prompts each, all shared = PROMPTS_PER_PLAYER total
+    assert len(rooms[code]["prompts"]) == game.PROMPTS_PER_PLAYER
 
 
 def test_start_game_sets_timer_end():
@@ -410,11 +451,8 @@ def test_start_game_broadcasts_game_state():
 
 def _room_in_submitting(n=2):
     code, player_ids = _room_with_n_players(n)
-    players = [{"id": pid} for pid in player_ids]
     room = rooms[code]
-    room["prompts"] = game.assign_prompts(
-        [p for p in room["players"]], num_prompts=3
-    )
+    room["prompts"] = game.assign_prompts(room["players"])
     room["current_prompt_idx"] = 0
     room["state"] = "submitting"
     return code, player_ids
@@ -451,7 +489,8 @@ def test_advance_state_scores_to_next_voting():
 def test_advance_state_scores_to_final_on_last_prompt():
     code, _ = _room_in_submitting()
     rooms[code]["state"] = "scores"
-    rooms[code]["current_prompt_idx"] = 2  # last of 3
+    last_idx = len(rooms[code]["prompts"]) - 1
+    rooms[code]["current_prompt_idx"] = last_idx
     mock_io = _mock_socketio()
     with patch("game._start_timer", return_value=MagicMock(dead=False)):
         game.advance_state(code, mock_io)
@@ -461,7 +500,8 @@ def test_advance_state_scores_to_final_on_last_prompt():
 def test_advance_state_final_clears_timer_end():
     code, _ = _room_in_submitting()
     rooms[code]["state"] = "scores"
-    rooms[code]["current_prompt_idx"] = 2
+    last_idx = len(rooms[code]["prompts"]) - 1
+    rooms[code]["current_prompt_idx"] = last_idx
     mock_io = _mock_socketio()
     with patch("game._start_timer", return_value=MagicMock(dead=False)):
         game.advance_state(code, mock_io)
@@ -542,3 +582,91 @@ def test_start_game_excludes_tv_players_from_prompt_assignments():
         game.start_game(code, mock_io)
     all_assigned_ids = {pid for p in rooms[code]["prompts"] for pid in p["player_ids"]}
     assert "tv1" not in all_assigned_ids
+
+
+# ---------------------------------------------------------------------------
+# _make_pairs — direct unit tests
+# ---------------------------------------------------------------------------
+
+def test_make_pairs_returns_empty_for_zero_players():
+    assert game._make_pairs(0) == []
+
+
+def test_make_pairs_returns_empty_for_one_player():
+    assert game._make_pairs(1) == []
+
+
+def test_make_pairs_n2_returns_prompts_per_player_pairs():
+    """2 players → exactly PROMPTS_PER_PLAYER pairs total."""
+    pairs = game._make_pairs(2)
+    assert len(pairs) == game.PROMPTS_PER_PLAYER
+
+
+def test_make_pairs_total_length_scales_with_player_count():
+    """Total pairs = ceil(n * PROMPTS_PER_PLAYER / 2)."""
+    import math
+    for n in range(2, 8):
+        pairs = game._make_pairs(n)
+        expected = math.ceil(n * game.PROMPTS_PER_PLAYER / 2)
+        assert len(pairs) == expected, f"n={n}: got {len(pairs)}, expected {expected}"
+
+
+def test_make_pairs_all_pairs_have_distinct_indices():
+    """No pair should have the same index twice (a player vs themselves)."""
+    for n in range(2, 8):
+        for (i, j) in game._make_pairs(n):
+            assert i != j, f"n={n}: pair ({i}, {j}) has the same index"
+
+
+def test_make_pairs_each_index_appears_at_least_prompts_per_player_times():
+    """Every player index must appear in at least PROMPTS_PER_PLAYER pairs."""
+    for n in range(2, 8):
+        pairs = game._make_pairs(n)
+        counts = [0] * n
+        for (i, j) in pairs:
+            counts[i] += 1
+            counts[j] += 1
+        for idx, count in enumerate(counts):
+            assert count >= game.PROMPTS_PER_PLAYER, (
+                f"n={n}: index {idx} appears only {count} times "
+                f"(expected >= {game.PROMPTS_PER_PLAYER})"
+            )
+
+
+def test_make_pairs_indices_within_valid_range():
+    """All pair indices must be valid (0 to n-1)."""
+    for n in range(2, 8):
+        for (i, j) in game._make_pairs(n):
+            assert 0 <= i < n, f"n={n}: index {i} out of range"
+            assert 0 <= j < n, f"n={n}: index {j} out of range"
+
+
+# ---------------------------------------------------------------------------
+# load_prompts
+# ---------------------------------------------------------------------------
+
+def test_load_prompts_returns_a_list():
+    prompts = game.load_prompts()
+    assert isinstance(prompts, list)
+
+
+def test_load_prompts_all_items_are_nonempty_strings():
+    for p in game.load_prompts():
+        assert isinstance(p, str), f"Expected str, got {type(p)}"
+        assert len(p) > 0, "Prompt must be non-empty"
+
+
+def test_load_prompts_has_enough_for_largest_game():
+    """The prompt pool must be large enough for an 8-player game (12 prompts)."""
+    prompts = game.load_prompts()
+    max_pairs = game._make_pairs(8)  # ceil(8 * 3 / 2) = 12
+    assert len(prompts) >= len(max_pairs), (
+        f"Only {len(prompts)} prompts in pool, need at least {len(max_pairs)} "
+        f"for an 8-player game"
+    )
+
+
+def test_load_prompts_returns_unique_strings():
+    """All prompts in the pool should be distinct."""
+    prompts = game.load_prompts()
+    assert len(prompts) == len(set(prompts)), "Duplicate prompts found in prompts.json"

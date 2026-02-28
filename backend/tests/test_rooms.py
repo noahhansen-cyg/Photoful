@@ -376,3 +376,57 @@ def test_get_current_prompt_respects_current_prompt_idx():
     rooms[code]["current_prompt_idx"] = 1
     prompt = room_store.get_current_prompt(code)
     assert prompt["prompt_id"] == "pid-2"
+
+
+# ---------------------------------------------------------------------------
+# add_submission — edge cases
+# ---------------------------------------------------------------------------
+
+def test_add_submission_overwrites_existing_submission():
+    """A player can resubmit; the second image_url replaces the first."""
+    code = _room_in_submitting()
+    room_store.add_submission(code, "pid-1", "p1", "/img_first.jpg")
+    result = room_store.add_submission(code, "pid-1", "p1", "/img_second.jpg")
+    assert result is True
+    assert rooms[code]["prompts"][0]["submissions"]["p1"]["image_url"] == "/img_second.jpg"
+
+
+# ---------------------------------------------------------------------------
+# get_room_state — additional field checks
+# ---------------------------------------------------------------------------
+
+def test_get_room_state_includes_player_score():
+    room = room_store.create_room()
+    room_store.add_player(room["code"], _make_player(id="p1", socket_id="s1"))
+    rooms[room["code"]]["players"][0]["score"] = 750
+    state = room_store.get_room_state(room["code"])
+    assert state["players"][0]["score"] == 750
+
+
+def test_get_room_state_includes_prompts_field():
+    """The prompts list is returned in state (needed during the submitting phase)."""
+    code = _room_in_submitting()
+    state = room_store.get_room_state(code)
+    assert "prompts" in state
+    assert len(state["prompts"]) == 1
+
+
+def test_get_room_state_includes_role_in_player_data():
+    """Player role is returned so the TV can filter out TV-role entries."""
+    room = room_store.create_room()
+    room_store.add_player(room["code"], _make_player(id="p1", socket_id="s1", role="host"))
+    state = room_store.get_room_state(room["code"])
+    assert state["players"][0]["role"] == "host"
+
+
+# ---------------------------------------------------------------------------
+# add_player — edge cases
+# ---------------------------------------------------------------------------
+
+def test_add_player_does_not_mutate_input_dict():
+    """add_player must not modify the caller's dict (uses {**player, ...} spread)."""
+    room = room_store.create_room()
+    original = _make_player()
+    snapshot = dict(original)
+    room_store.add_player(room["code"], original)
+    assert original == snapshot

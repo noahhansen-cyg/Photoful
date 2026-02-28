@@ -168,6 +168,36 @@ def handle_join(data):
     socketio.emit("game:state", room_store.get_room_state(code), to=code)
 
 
+@socketio.on("host:claim")
+def handle_claim_host(data):
+    code = data.get("room_code", "").upper()
+    sid  = request.sid[:8]
+
+    room = room_store.get_room(code)
+    if not room:
+        emit("error", {"message": "Room not found"})
+        return
+    if room["state"] != "lobby":
+        emit("error", {"message": "Cannot claim host after game has started"})
+        return
+
+    sender = next((p for p in room["players"] if p["socket_id"] == request.sid), None)
+    if not sender:
+        emit("error", {"message": "Player not found"})
+        return
+
+    if room["host_id"] is not None:
+        emit("error", {"message": "A host has already been assigned"})
+        return
+
+    sender["role"] = "host"
+    room["host_id"] = sender["id"]
+    log.info("room=%-4s event=host:claim  player=%-12s sid=%s", code, sender["name"], sid)
+
+    emit("player:self", {"player_id": sender["id"], "role": "host"})
+    socketio.emit("game:state", room_store.get_room_state(code), to=code)
+
+
 @socketio.on("host:start")
 def handle_start(data):
     code = data.get("room_code", "").upper()

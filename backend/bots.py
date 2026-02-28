@@ -1,19 +1,23 @@
 #!/usr/bin/env python3
 """
-bots.py — Spawn 3 bot players for local testing.
+bots.py — Spawn bot players for local testing.
 
 Usage:
-  python bots.py            → creates a new room, prints the TV URL
-  python bots.py ABCD       → joins an existing room (TV already open)
+  python bots.py                    → creates a new room with 3 bots, prints the TV URL
+  python bots.py ABCD               → joins an existing room with 3 bots
+  python bots.py --count 5          → creates a new room with 5 bots
+  python bots.py ABCD --count 5    → joins an existing room with 5 bots
 
 Bots (all join as regular players):
-  AliceBot, BobBot, CarolBot — auto-submit a solid-blue JPEG for each
-  assigned prompt and auto-vote in matchups they aren't competing in.
+  AliceBot … HankBot — auto-submit a solid-blue JPEG for each assigned
+  prompt and auto-vote in matchups they aren't competing in.
+  Maximum 8 bots (room player limit).
 
 You join as Host on your phone and start the game yourself.
 Press Ctrl+C to stop.
 """
 
+import argparse
 import sys
 import time
 import io
@@ -206,9 +210,23 @@ class Bot:
 # Entry point
 # ---------------------------------------------------------------------------
 
+BOT_NAMES = ["AliceBot", "BobBot", "CarolBot", "DaveBot", "EveBot", "FrankBot", "GraceBot", "HankBot"]
+MAX_BOTS  = 8
+
+
 def main():
-    if len(sys.argv) > 1:
-        code = sys.argv[1].strip().upper()
+    parser = argparse.ArgumentParser(description="Spawn bot players for local testing.")
+    parser.add_argument("room_code", nargs="?", help="Existing room code to join (omit to create a new room)")
+    parser.add_argument("--count", type=int, default=3, metavar="N",
+                        help="Number of bots to spawn (1–8, default 3)")
+    args = parser.parse_args()
+
+    count = max(1, min(args.count, MAX_BOTS))
+    if count != args.count:
+        print(f"Bot count clamped to {count} (allowed range: 1–{MAX_BOTS})")
+
+    if args.room_code:
+        code = args.room_code.strip().upper()
         print(f"Joining existing room: {code}")
     else:
         try:
@@ -223,17 +241,13 @@ def main():
         print(f"\nCreated room:  {code}")
         print(f"Open TV at:    http://localhost:5173/room/{code}/tv\n")
 
-    bots = [
-        Bot("AliceBot", "player", code),
-        Bot("BobBot",   "player", code),
-        Bot("CarolBot", "player", code),
-    ]
+    bots = [Bot(BOT_NAMES[i], "player", code) for i in range(count)]
 
     for bot in bots:
         bot.connect()
         time.sleep(0.3)   # slight stagger so joins aren't simultaneous
 
-    print("All bots connected. Join as Host on your phone and start the game.")
+    print(f"All {count} bots connected. Join as Host on your phone and start the game.")
 
     try:
         bots[0].wait()

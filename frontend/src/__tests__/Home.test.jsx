@@ -44,9 +44,9 @@ describe("Home rendering", () => {
     expect(screen.getByPlaceholderText(/room code/i)).toBeInTheDocument();
   });
 
-  it("shows a Join as Player button", () => {
+  it("shows a Join Game button", () => {
     renderHome();
-    expect(screen.getByRole("button", { name: /join as player/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /join game/i })).toBeInTheDocument();
   });
 });
 
@@ -116,10 +116,10 @@ describe("Join Room", () => {
 
     renderHome();
     await userEvent.type(screen.getByPlaceholderText(/room code/i), "ABCD");
-    await userEvent.click(screen.getByRole("button", { name: /join as player/i }));
+    await userEvent.click(screen.getByRole("button", { name: /join game/i }));
 
     await waitFor(() => {
-      expect(mockNavigate).toHaveBeenCalledWith("/room/ABCD/phone", { state: { role: "player" } });
+      expect(mockNavigate).toHaveBeenCalledWith("/room/ABCD/phone");
     });
   });
 
@@ -137,7 +137,7 @@ describe("Join Room", () => {
 
     renderHome();
     await userEvent.type(screen.getByPlaceholderText(/room code/i), "ABCD");
-    await userEvent.click(screen.getByRole("button", { name: /join as player/i }));
+    await userEvent.click(screen.getByRole("button", { name: /join game/i }));
 
     await waitFor(() => {
       expect(fetchSpy).toHaveBeenCalledWith("/api/rooms/ABCD");
@@ -151,7 +151,7 @@ describe("Join Room", () => {
 
     renderHome();
     await userEvent.type(screen.getByPlaceholderText(/room code/i), "ZZZZ");
-    await userEvent.click(screen.getByRole("button", { name: /join as player/i }));
+    await userEvent.click(screen.getByRole("button", { name: /join game/i }));
 
     await waitFor(() => {
       expect(screen.getByText(/not found/i)).toBeInTheDocument();
@@ -163,7 +163,7 @@ describe("Join Room", () => {
 
     renderHome();
     await userEvent.type(screen.getByPlaceholderText(/room code/i), "ABCD");
-    await userEvent.click(screen.getByRole("button", { name: /join as player/i }));
+    await userEvent.click(screen.getByRole("button", { name: /join game/i }));
 
     await waitFor(() => {
       expect(screen.getByText(/failed to check room/i)).toBeInTheDocument();
@@ -172,34 +172,8 @@ describe("Join Room", () => {
 
   it("does not navigate if room code input is empty", async () => {
     renderHome();
-    await userEvent.click(screen.getByRole("button", { name: /join as player/i }));
+    await userEvent.click(screen.getByRole("button", { name: /join game/i }));
     expect(mockNavigate).not.toHaveBeenCalled();
   });
 });
 
-// ---------------------------------------------------------------------------
-// Role toggle
-// ---------------------------------------------------------------------------
-
-describe("Role toggle", () => {
-  it("changes the join button text to Join as Host when Host is selected", async () => {
-    renderHome();
-    await userEvent.click(screen.getByRole("button", { name: /^host$/i }));
-    expect(screen.getByRole("button", { name: /join as host/i })).toBeInTheDocument();
-  });
-
-  it("navigates with role host in location state when joining as Host", async () => {
-    vi.spyOn(global, "fetch").mockResolvedValueOnce({
-      json: async () => ({ exists: true }),
-    });
-
-    renderHome();
-    await userEvent.click(screen.getByRole("button", { name: /^host$/i }));
-    await userEvent.type(screen.getByPlaceholderText(/room code/i), "ABCD");
-    await userEvent.click(screen.getByRole("button", { name: /join as host/i }));
-
-    await waitFor(() => {
-      expect(mockNavigate).toHaveBeenCalledWith("/room/ABCD/phone", { state: { role: "host" } });
-    });
-  });
-});
