@@ -342,8 +342,18 @@ function PromptSubmitCard({ code, prompt, myPlayerId }) {
 // ---------------------------------------------------------------------------
 
 function VotingScreen({ code, prompt, myPlayerId, isAssigned, players }) {
-  const [voted, setVoted] = useState(false);
+  const [voted, setVoted]           = useState(false);
+  const [photosReady, setPhotosReady] = useState(false);
+  const promptId = prompt?.prompt_id;
   const alreadyVoted = prompt?.votes?.[myPlayerId];
+
+  // Mirror the TV's 3-second reveal delay so photos aren't visible on phones
+  // while the TV is still fading them in.
+  useEffect(() => {
+    setPhotosReady(false);
+    const t = setTimeout(() => setPhotosReady(true), 3000);
+    return () => clearTimeout(t);
+  }, [promptId]);
 
   if (isAssigned) {
     return (
@@ -359,6 +369,15 @@ function VotingScreen({ code, prompt, myPlayerId, isAssigned, players }) {
       <div style={styles.section}>
         <div style={styles.bigCheck}>✓</div>
         <p style={styles.label}>Vote cast!</p>
+      </div>
+    );
+  }
+
+  if (!photosReady) {
+    return (
+      <div style={styles.section}>
+        <p style={styles.label}>Photos are being revealed...</p>
+        <p style={styles.hint}>Voting opens in a moment</p>
       </div>
     );
   }
