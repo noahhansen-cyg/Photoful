@@ -22,7 +22,7 @@ quiplash_but_fun_and_pictures-/
 │   ├── game.py         # State machine, prompt assignment, scoring
 │   ├── rooms.py        # In-memory room/player state management
 │   ├── bots.py         # Bot players for local testing (make devtest)
-│   ├── prompts.json    # Bank of 24 photo prompts
+│   ├── prompts.json    # Bank of 46 photo prompts
 │   ├── uploads/        # Uploaded photos (created at runtime)
 │   └── requirements.txt
 ├── frontend/
@@ -102,12 +102,12 @@ The frontend runs on `http://localhost:5173`. It proxies `/api`, `/socket.io`, a
 4. One player enters the code, toggles to **Host**, and joins — they'll see a **Start Game** button
 5. Other players enter the code and join as **Player** — they appear on the TV in real time
 6. Host taps **Start Game** (requires at least 2 players)
-7. **Submitting (90s):** Each player sees all their assigned prompts at once. Take a photo for each, add an optional caption, and submit. The TV shows who has submitted with checkmarks
+7. **Submitting (120s):** Each player sees all their assigned prompts at once. Take a photo for each, add an optional caption, and submit. The TV shows who has submitted with checkmarks
 8. **Voting (30s per prompt):** The TV shows two competing photos side-by-side. Non-competing players vote on their phone by tapping a photo
-9. **Scores (10s):** The TV shows both photos again with the round winner highlighted and points earned. Then auto-advances to the next prompt
+9. **Scores (5s):** The TV shows both photos again with the round winner highlighted and points earned. Then auto-advances to the next prompt
 10. After all 3 prompts → **Final leaderboard** with the overall winner
 
-**Game flow:** `lobby → submitting (90s, all prompts) → voting (30s) → scores (10s) → [repeat voting/scores] → final`
+**Game flow:** `lobby → submitting (120s, all prompts) → voting (30s) → scores (5s) → [repeat voting/scores] → final`
 
 **Finding your local IP:**
 ```bash

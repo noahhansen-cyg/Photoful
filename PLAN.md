@@ -50,7 +50,7 @@ VOTING  (30s per prompt)
   Non-competing players vote on their phone.
   → (all eligible players voted, OR timer expires) → SCORES
 
-SCORES  (10s)
+SCORES  (5s)
   TV shows both competing photos with round winner highlighted and points earned.
   No leaderboard yet — that's reserved for the end.
   → (more prompts remain) → VOTING (next prompt)
@@ -200,7 +200,7 @@ def _start_timer(room_code, seconds, callback, socketio):
 Timeouts:
 - Submit: 120s
 - Vote: 30s
-- Scores display: 10s
+- Scores display: 5s
 
 ---
 
@@ -248,7 +248,7 @@ Timeouts:
 - Photo upload endpoint + Pillow server-side resize
 - Multi-prompt submission phase (120s, all prompts active simultaneously)
 - Voting phase per prompt (30s); TV hides photos for 3s then fades them in
-- Scores screen shows competing photos + round winner (10s)
+- Scores screen shows competing photos + round winner (5s)
 - Final leaderboard
 - QR code in lobby (resolves local network IP automatically)
 - Socket reconnection with state restore

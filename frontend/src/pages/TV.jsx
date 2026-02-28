@@ -242,7 +242,7 @@ function ScoresScreen({ gameState, players, timeLeft }) {
       {maxDelta > 0 && !isTie && (
         <p style={styles.roundPoints}>+{maxDelta.toLocaleString()} pts</p>
       )}
-      <TimerBar timeLeft={timeLeft} total={10} />
+      <TimerBar timeLeft={timeLeft} total={5} />
       <div style={styles.photoRow}>
         {playerIds.map(pid => {
           const sub      = submissions[pid];
