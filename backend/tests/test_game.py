@@ -697,3 +697,13 @@ def test_start_game_timer_end_is_submit_timeout_from_now():
         f"timer_end {rooms[code]['timer_end']:.2f} not in "
         f"[{expected_min:.2f}, {expected_max:.2f}]"
     )
+
+
+# ---------------------------------------------------------------------------
+# Timeout constants — SCORES_TIMEOUT
+# ---------------------------------------------------------------------------
+
+def test_scores_timeout_is_5_seconds():
+    assert game.SCORES_TIMEOUT == 5, (
+        f"SCORES_TIMEOUT is {game.SCORES_TIMEOUT}s — expected 5s"
+    )

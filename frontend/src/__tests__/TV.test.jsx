@@ -470,6 +470,20 @@ describe("TV final screen", () => {
     });
     expect(screen.getByText(/game over/i)).toBeInTheDocument();
   });
+
+  it("shows a hint that the host can tap Play Again? to restart", () => {
+    renderTV();
+    act(() => {
+      emit("game:state", {
+        state: "final",
+        players: [
+          { id: "1", name: "Alice", role: "player", avatar_color: "#FF6B6B", score: 1000 },
+          { id: "2", name: "Bob",   role: "player", avatar_color: "#4ECDC4", score: 500 },
+        ],
+      });
+    });
+    expect(screen.getByText(/play again/i)).toBeInTheDocument();
+  });
 });
 
 // ---------------------------------------------------------------------------

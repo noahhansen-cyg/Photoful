@@ -44,6 +44,9 @@ function renderPhone(code = "ABCD") {
 beforeEach(() => {
   vi.clearAllMocks();
   Object.keys(socketListeners).forEach((k) => delete socketListeners[k]);
+  // Clear localStorage so player:self writes from one test don't auto-join
+  // subsequent tests that render Phone with the same room code.
+  localStorage.clear();
 });
 
 // ---------------------------------------------------------------------------
@@ -343,11 +346,19 @@ describe("Phone host lobby", () => {
 // ---------------------------------------------------------------------------
 
 describe("Phone voting screen", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   async function joinAndVote() {
     renderPhone("ABCD");
+    // Join with real timers so userEvent doesn't hang on internal 0ms delays.
     await userEvent.type(screen.getByPlaceholderText(/your name/i), "Carol");
     await userEvent.click(screen.getByRole("button", { name: /join game/i }));
-    // Carol is not competing (player_ids = p1, p2) → sees vote cards
+
+    // Switch to fake timers AFTER joining, emit voting state, then advance
+    // past the 3-second lockout so vote cards become visible.
+    vi.useFakeTimers();
     act(() => {
       emit("game:state", {
         state: "voting",
@@ -364,6 +375,7 @@ describe("Phone voting screen", () => {
         ],
       });
     });
+    act(() => { vi.advanceTimersByTime(3000); });
   }
 
   it("shows a vote card for each competing player", async () => {
@@ -374,6 +386,8 @@ describe("Phone voting screen", () => {
 
   it("emits submit:vote with the chosen player when a vote card is clicked", async () => {
     await joinAndVote();
+    // Switch back to real timers before the click so userEvent doesn't hang.
+    vi.useRealTimers();
     mockSocket.emit.mockClear();
     await userEvent.click(screen.getByText("Alice").closest("button"));
     expect(mockSocket.emit).toHaveBeenCalledWith("submit:vote", {
@@ -583,6 +597,7 @@ describe("Phone submitting screen — assigned player", () => {
     await joinAndEmitAssigned();
 
     vi.spyOn(global, "fetch").mockResolvedValueOnce({
+      ok: true,
       json: async () => ({ image_url: "/uploads/ABCD/photo.jpg" }),
     });
 
@@ -610,6 +625,7 @@ describe("Phone submitting screen — assigned player", () => {
     await joinAndEmitAssigned();
 
     vi.spyOn(global, "fetch").mockResolvedValueOnce({
+      ok: true,
       json: async () => ({ image_url: "/uploads/ABCD/photo.jpg" }),
     });
 
@@ -701,5 +717,271 @@ describe("Phone socket reconnection role", () => {
       name:      "Alice",
       role:      "host",
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Session persistence (localStorage)
+// ---------------------------------------------------------------------------
+
+describe("Phone session persistence", () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  afterEach(() => {
+    localStorage.clear();
+  });
+
+  it("saves name, player_id, and role to localStorage when player:self is received", async () => {
+    renderPhone("ABCD");
+    await userEvent.type(screen.getByPlaceholderText(/your name/i), "Alice");
+    await userEvent.click(screen.getByRole("button", { name: /join game/i }));
+
+    act(() => { emit("player:self", { player_id: "p1", role: "player" }); });
+
+    const saved = JSON.parse(localStorage.getItem("pq_session_ABCD"));
+    expect(saved).toMatchObject({ name: "Alice", myPlayerId: "p1", myRole: "player" });
+  });
+
+  it("auto-joins from saved session on mount, skipping the name entry screen", () => {
+    localStorage.setItem(
+      "pq_session_ABCD",
+      JSON.stringify({ name: "Alice", myPlayerId: "p1", myRole: "player" })
+    );
+    renderPhone("ABCD");
+
+    // Should have connected and emitted player:join without user interaction
+    expect(mockSocket.connect).toHaveBeenCalled();
+    expect(mockSocket.emit).toHaveBeenCalledWith("player:join", {
+      room_code: "ABCD",
+      name: "Alice",
+      role: "player",
+    });
+  });
+
+  it("does not show the name-entry screen when a saved session exists", () => {
+    localStorage.setItem(
+      "pq_session_ABCD",
+      JSON.stringify({ name: "Alice", myPlayerId: "p1", myRole: "player" })
+    );
+    renderPhone("ABCD");
+
+    expect(screen.queryByPlaceholderText(/your name/i)).not.toBeInTheDocument();
+  });
+
+  it("auto-joins with saved host role from localStorage", () => {
+    localStorage.setItem(
+      "pq_session_ABCD",
+      JSON.stringify({ name: "Eve", myPlayerId: "p1", myRole: "host" })
+    );
+    renderPhone("ABCD");
+
+    expect(mockSocket.emit).toHaveBeenCalledWith("player:join", {
+      room_code: "ABCD",
+      name: "Eve",
+      role: "host",
+    });
+  });
+
+  it("clears localStorage and shows name entry when stale session gets an error before player:self", () => {
+    localStorage.setItem(
+      "pq_session_ABCD",
+      JSON.stringify({ name: "Alice", myPlayerId: "p1", myRole: "player" })
+    );
+    renderPhone("ABCD");
+
+    // Server rejects the rejoin (room gone, server restarted, etc.)
+    act(() => { emit("error", { message: "Room ABCD not found" }); });
+
+    expect(screen.getByPlaceholderText(/your name/i)).toBeInTheDocument();
+    expect(localStorage.getItem("pq_session_ABCD")).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Upload error handling
+// ---------------------------------------------------------------------------
+
+describe("Phone upload error handling", () => {
+  beforeEach(() => {
+    global.URL.createObjectURL = vi.fn(() => "blob:http://localhost/fake-preview");
+  });
+
+  async function joinAndEmitAssigned() {
+    renderPhone("ABCD");
+    await userEvent.type(screen.getByPlaceholderText(/your name/i), "Alice");
+    await userEvent.click(screen.getByRole("button", { name: /join game/i }));
+    act(() => {
+      emit("player:self", { player_id: "p1", role: "player" });
+      emit("game:state", {
+        state: "submitting",
+        prompts: [{
+          prompt_id:   "pid-1",
+          prompt_text: "Show us your favourite spot",
+          player_ids:  ["p1", "p2"],
+          submissions: {},
+          votes:       {},
+        }],
+        players: [
+          { id: "p1", name: "Alice", role: "player", avatar_color: "#FF6B6B" },
+          { id: "p2", name: "Bob",   role: "player", avatar_color: "#4ECDC4" },
+        ],
+      });
+    });
+  }
+
+  it("shows an error message when the upload returns a non-OK HTTP status", async () => {
+    await joinAndEmitAssigned();
+
+    vi.spyOn(global, "fetch").mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      json: async () => ({ error: "Not in submission phase" }),
+    });
+
+    const file  = new File(["data"], "photo.jpg", { type: "image/jpeg" });
+    const input = document.querySelector('input[type="file"]');
+    await userEvent.upload(input, file);
+    await userEvent.click(screen.getByRole("button", { name: /submit photo/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/upload failed/i)).toBeInTheDocument();
+    });
+  });
+
+  it("does not emit submit:photo when the upload returns an error", async () => {
+    await joinAndEmitAssigned();
+
+    vi.spyOn(global, "fetch").mockResolvedValueOnce({
+      ok: false,
+      status: 500,
+      json: async () => ({ error: "Server error" }),
+    });
+
+    const file  = new File(["data"], "photo.jpg", { type: "image/jpeg" });
+    const input = document.querySelector('input[type="file"]');
+    await userEvent.upload(input, file);
+    mockSocket.emit.mockClear();
+    await userEvent.click(screen.getByRole("button", { name: /submit photo/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/upload failed/i)).toBeInTheDocument();
+    });
+    expect(mockSocket.emit).not.toHaveBeenCalledWith("submit:photo", expect.anything());
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Play Again button (host only, final state)
+// ---------------------------------------------------------------------------
+
+describe("Phone play again button", () => {
+  async function joinAndFinalAs(myId, myRole) {
+    renderPhone("ABCD");
+    await userEvent.type(screen.getByPlaceholderText(/your name/i), "Alice");
+    await userEvent.click(screen.getByRole("button", { name: /join game/i }));
+    act(() => { emit("player:self", { player_id: myId, role: myRole }); });
+    act(() => {
+      emit("game:state", {
+        state: "final",
+        players: [
+          { id: "p1", name: "Alice", role: "host",   avatar_color: "#FF6B6B", score: 1000 },
+          { id: "p2", name: "Bob",   role: "player", avatar_color: "#4ECDC4", score: 500 },
+        ],
+      });
+    });
+  }
+
+  it("shows a Play Again? button for the host in final state", async () => {
+    await joinAndFinalAs("p1", "host");
+    expect(screen.getByRole("button", { name: /play again/i })).toBeInTheDocument();
+  });
+
+  it("does not show Play Again? button for a regular player in final state", async () => {
+    await joinAndFinalAs("p2", "player");
+    expect(screen.queryByRole("button", { name: /play again/i })).not.toBeInTheDocument();
+  });
+
+  it("emits host:restart when Play Again? is clicked", async () => {
+    await joinAndFinalAs("p1", "host");
+    mockSocket.emit.mockClear();
+    await userEvent.click(screen.getByRole("button", { name: /play again/i }));
+    expect(mockSocket.emit).toHaveBeenCalledWith("host:restart", { room_code: "ABCD" });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Vote lockout — 3-second delay before vote cards appear
+// ---------------------------------------------------------------------------
+
+describe("Phone vote lockout (3-second reveal delay)", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  async function joinPhoneAsVoter() {
+    renderPhone("ABCD");
+    // Join with real timers so userEvent doesn't hang, then switch to fake timers.
+    await userEvent.type(screen.getByPlaceholderText(/your name/i), "Carol");
+    await userEvent.click(screen.getByRole("button", { name: /join game/i }));
+    act(() => { emit("player:self", { player_id: "p3", role: "player" }); });
+    // Switch to fake timers after joining so we can control the 3s lockout.
+    vi.useFakeTimers();
+  }
+
+  function emitVoting(promptId = "pid-1") {
+    act(() => {
+      emit("game:state", {
+        state: "voting",
+        current_prompt: {
+          prompt_id:   promptId,
+          player_ids:  ["p1", "p2"],
+          submissions: {},
+          votes:       {},
+          prompt_text: "Best photo?",
+        },
+        players: [
+          { id: "p1", name: "Alice", role: "player", avatar_color: "#FF6B6B" },
+          { id: "p2", name: "Bob",   role: "player", avatar_color: "#4ECDC4" },
+        ],
+      });
+    });
+  }
+
+  it("shows 'Photos are being revealed' immediately when voting begins", async () => {
+    await joinPhoneAsVoter();
+    emitVoting();
+    expect(screen.getByText(/photos are being revealed/i)).toBeInTheDocument();
+  });
+
+  it("does not show vote cards before the 3-second lockout expires", async () => {
+    await joinPhoneAsVoter();
+    emitVoting();
+    // Alice and Bob names only appear inside vote card buttons
+    expect(screen.queryByRole("button", { name: /alice/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /bob/i })).not.toBeInTheDocument();
+  });
+
+  it("shows vote cards after 3 seconds", async () => {
+    await joinPhoneAsVoter();
+    emitVoting();
+    act(() => { vi.advanceTimersByTime(3000); });
+    expect(screen.getByText("Alice")).toBeInTheDocument();
+    expect(screen.getByText("Bob")).toBeInTheDocument();
+  });
+
+  it("resets the lockout when a new prompt arrives", async () => {
+    await joinPhoneAsVoter();
+    emitVoting("pid-1");
+    act(() => { vi.advanceTimersByTime(3000); });
+    // Vote cards are visible after the first lockout
+    expect(screen.getByText("Alice")).toBeInTheDocument();
+
+    // A second prompt arrives
+    emitVoting("pid-2");
+    // Lockout resets — vote cards hidden again
+    expect(screen.getByText(/photos are being revealed/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /alice/i })).not.toBeInTheDocument();
   });
 });

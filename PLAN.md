@@ -254,7 +254,12 @@ Timeouts:
 - Socket reconnection with state restore
 - Bot players for local testing (`make devtest bots=N`); room code reprinted at end
 - Ctrl+C on `make dev`/`make devtest` fully stops servers (no `make stop` needed)
-- Full test suite: 167 backend (pytest) + 95 frontend (vitest)
+- Page refresh rejoins automatically via localStorage session persistence
+- Upload error handling: 30s timeout, HTTP error check, visible error message
+- Play Again button (host only) restarts with existing players after final
+- Phone vote cards hidden for 3s to match TV reveal animation
+- Scores screen display reduced from 10s to 5s
+- Full test suite: 183 backend (pytest) + 110 frontend (vitest)
 
 ### Sprint 3 — Polish (planned)
 - Sound effects
