@@ -1,8 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, act } from "@testing-library/react";
+import { render, screen, act, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import Phone from "../pages/Phone";
+
+// browser-image-compression: pass the file through unchanged so upload tests
+// don't need a real image compressor.
+vi.mock("browser-image-compression", () => ({
+  default: vi.fn(async (file) => file),
+}));
 
 // ---------------------------------------------------------------------------
 // Mock socket singleton
@@ -443,5 +449,257 @@ describe("Phone final screen", () => {
       { id: "p2", name: "Bob",   role: "player", avatar_color: "#4ECDC4", score: 500 },
     ]);
     expect(screen.getByText(/alice wins/i)).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Submitting screen — non-assigned player
+// ---------------------------------------------------------------------------
+
+describe("Phone submitting screen — non-assigned player", () => {
+  async function joinAndEmitNonAssigned() {
+    renderPhone("ABCD");
+    await userEvent.type(screen.getByPlaceholderText(/your name/i), "Carol");
+    await userEvent.click(screen.getByRole("button", { name: /join game/i }));
+    act(() => {
+      emit("player:self", { player_id: "p3", role: "player" });
+      emit("game:state", {
+        state: "submitting",
+        prompts: [{
+          prompt_id:   "pid-1",
+          prompt_text: "Show us your pet",
+          player_ids:  ["p1", "p2"],  // Carol (p3) is NOT assigned
+          submissions: {},
+          votes:       {},
+        }],
+        players: [
+          { id: "p1", name: "Alice", role: "player", avatar_color: "#FF6B6B" },
+          { id: "p2", name: "Bob",   role: "player", avatar_color: "#4ECDC4" },
+          { id: "p3", name: "Carol", role: "player", avatar_color: "#FFE66D" },
+        ],
+      });
+    });
+  }
+
+  it("shows 'Hang tight' message for a non-assigned player", async () => {
+    await joinAndEmitNonAssigned();
+    expect(screen.getByText(/hang tight/i)).toBeInTheDocument();
+  });
+
+  it("does not show the prompt text for a non-assigned player", async () => {
+    await joinAndEmitNonAssigned();
+    expect(screen.queryByText(/show us your pet/i)).not.toBeInTheDocument();
+  });
+
+  it("does not show the submit photo button for a non-assigned player", async () => {
+    await joinAndEmitNonAssigned();
+    expect(screen.queryByRole("button", { name: /submit photo/i })).not.toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Submitting screen — assigned player
+// ---------------------------------------------------------------------------
+
+describe("Phone submitting screen — assigned player", () => {
+  beforeEach(() => {
+    // JSDOM does not implement URL.createObjectURL; stub it for file preview tests.
+    global.URL.createObjectURL = vi.fn(() => "blob:http://localhost/fake-preview");
+  });
+
+  async function joinAndEmitAssigned() {
+    renderPhone("ABCD");
+    await userEvent.type(screen.getByPlaceholderText(/your name/i), "Alice");
+    await userEvent.click(screen.getByRole("button", { name: /join game/i }));
+    act(() => {
+      emit("player:self", { player_id: "p1", role: "player" });
+      emit("game:state", {
+        state: "submitting",
+        prompts: [{
+          prompt_id:   "pid-1",
+          prompt_text: "Show us your favourite spot",
+          player_ids:  ["p1", "p2"],
+          submissions: {},
+          votes:       {},
+        }],
+        players: [
+          { id: "p1", name: "Alice", role: "player", avatar_color: "#FF6B6B" },
+          { id: "p2", name: "Bob",   role: "player", avatar_color: "#4ECDC4" },
+        ],
+      });
+    });
+  }
+
+  it("shows the prompt text for an assigned player", async () => {
+    await joinAndEmitAssigned();
+    expect(screen.getByText(/show us your favourite spot/i)).toBeInTheDocument();
+  });
+
+  it("shows the photo upload button", async () => {
+    await joinAndEmitAssigned();
+    expect(screen.getByText(/take.*choose photo/i)).toBeInTheDocument();
+  });
+
+  it("shows the Submit Photo button disabled before a file is selected", async () => {
+    await joinAndEmitAssigned();
+    expect(screen.getByRole("button", { name: /submit photo/i })).toBeDisabled();
+  });
+
+  it("shows a checkmark when the player already has a submission in state", async () => {
+    renderPhone("ABCD");
+    await userEvent.type(screen.getByPlaceholderText(/your name/i), "Alice");
+    await userEvent.click(screen.getByRole("button", { name: /join game/i }));
+    act(() => {
+      emit("player:self", { player_id: "p1", role: "player" });
+      emit("game:state", {
+        state: "submitting",
+        prompts: [{
+          prompt_id:   "pid-1",
+          prompt_text: "Show us your favourite spot",
+          player_ids:  ["p1", "p2"],
+          // p1 has already submitted
+          submissions: { p1: { image_url: "/img.jpg", caption: null } },
+          votes: {},
+        }],
+        players: [
+          { id: "p1", name: "Alice", role: "player", avatar_color: "#FF6B6B" },
+          { id: "p2", name: "Bob",   role: "player", avatar_color: "#4ECDC4" },
+        ],
+      });
+    });
+    expect(screen.getByText("✓")).toBeInTheDocument();
+    expect(screen.getByText(/submitted/i)).toBeInTheDocument();
+  });
+
+  it("enables the Submit Photo button after a file is selected", async () => {
+    await joinAndEmitAssigned();
+    const file  = new File(["data"], "photo.jpg", { type: "image/jpeg" });
+    const input = document.querySelector('input[type="file"]');
+    await userEvent.upload(input, file);
+    expect(screen.getByRole("button", { name: /submit photo/i })).not.toBeDisabled();
+  });
+
+  it("emits submit:photo with the upload URL and caption after a successful upload", async () => {
+    await joinAndEmitAssigned();
+
+    vi.spyOn(global, "fetch").mockResolvedValueOnce({
+      json: async () => ({ image_url: "/uploads/ABCD/photo.jpg" }),
+    });
+
+    const file  = new File(["data"], "photo.jpg", { type: "image/jpeg" });
+    const input = document.querySelector('input[type="file"]');
+    await userEvent.upload(input, file);
+
+    // Type a caption
+    await userEvent.type(screen.getByPlaceholderText(/caption/i), "Great view");
+
+    mockSocket.emit.mockClear();
+    await userEvent.click(screen.getByRole("button", { name: /submit photo/i }));
+
+    await waitFor(() => {
+      expect(mockSocket.emit).toHaveBeenCalledWith("submit:photo", {
+        room_code: "ABCD",
+        prompt_id: "pid-1",
+        image_url: "/uploads/ABCD/photo.jpg",
+        caption:   "Great view",
+      });
+    });
+  });
+
+  it("shows the submitted checkmark after a successful upload", async () => {
+    await joinAndEmitAssigned();
+
+    vi.spyOn(global, "fetch").mockResolvedValueOnce({
+      json: async () => ({ image_url: "/uploads/ABCD/photo.jpg" }),
+    });
+
+    const file  = new File(["data"], "photo.jpg", { type: "image/jpeg" });
+    const input = document.querySelector('input[type="file"]');
+    await userEvent.upload(input, file);
+
+    await userEvent.click(screen.getByRole("button", { name: /submit photo/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("✓")).toBeInTheDocument();
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Voting screen — competing player message
+// ---------------------------------------------------------------------------
+
+describe("Phone voting screen — competing player", () => {
+  it("shows 'your photo is up for votes' when the player is competing", async () => {
+    renderPhone("ABCD");
+    await userEvent.type(screen.getByPlaceholderText(/your name/i), "Alice");
+    await userEvent.click(screen.getByRole("button", { name: /join game/i }));
+    act(() => {
+      emit("player:self", { player_id: "p1", role: "player" });
+      emit("game:state", {
+        state: "voting",
+        current_prompt: {
+          prompt_id:   "pid-1",
+          player_ids:  ["p1", "p2"],  // Alice IS competing
+          submissions: {},
+          votes:       {},
+          prompt_text: "Best photo?",
+        },
+        players: [
+          { id: "p1", name: "Alice", role: "player", avatar_color: "#FF6B6B" },
+          { id: "p2", name: "Bob",   role: "player", avatar_color: "#4ECDC4" },
+        ],
+      });
+    });
+    expect(screen.getByText(/your photo is up for votes/i)).toBeInTheDocument();
+  });
+
+  it("does not show vote cards when the player is competing", async () => {
+    renderPhone("ABCD");
+    await userEvent.type(screen.getByPlaceholderText(/your name/i), "Alice");
+    await userEvent.click(screen.getByRole("button", { name: /join game/i }));
+    act(() => {
+      emit("player:self", { player_id: "p1", role: "player" });
+      emit("game:state", {
+        state: "voting",
+        current_prompt: {
+          prompt_id:   "pid-1",
+          player_ids:  ["p1", "p2"],
+          submissions: {},
+          votes:       {},
+          prompt_text: "Best photo?",
+        },
+        players: [
+          { id: "p1", name: "Alice", role: "player", avatar_color: "#FF6B6B" },
+          { id: "p2", name: "Bob",   role: "player", avatar_color: "#4ECDC4" },
+        ],
+      });
+    });
+    expect(screen.queryByText(/tap to vote/i)).not.toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Socket reconnection preserves role
+// ---------------------------------------------------------------------------
+
+describe("Phone socket reconnection role", () => {
+  it("re-emits player:join with host role after claiming host", async () => {
+    renderPhone("ABCD");
+    await userEvent.type(screen.getByPlaceholderText(/your name/i), "Alice");
+    await userEvent.click(screen.getByRole("button", { name: /join game/i }));
+
+    // Server confirms host role
+    act(() => { emit("player:self", { player_id: "p1", role: "host" }); });
+
+    mockSocket.emit.mockClear();
+    // Simulate socket reconnect
+    act(() => { emit("connect"); });
+
+    expect(mockSocket.emit).toHaveBeenCalledWith("player:join", {
+      room_code: "ABCD",
+      name:      "Alice",
+      role:      "host",
+    });
   });
 });

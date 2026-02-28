@@ -434,4 +434,113 @@ describe("TV final screen", () => {
     });
     expect(screen.getByText(/alice wins/i)).toBeInTheDocument();
   });
+
+  it("shows the leaderboard in descending score order", () => {
+    renderTV();
+    act(() => {
+      emit("game:state", {
+        state: "final",
+        players: [
+          // Deliberately out of order to verify the component sorts them
+          { id: "2", name: "Bob",   role: "player", avatar_color: "#4ECDC4", score: 500 },
+          { id: "1", name: "Alice", role: "player", avatar_color: "#FF6B6B", score: 2000 },
+          { id: "3", name: "Carol", role: "player", avatar_color: "#FFE66D", score: 1000 },
+        ],
+      });
+    });
+    const ranks = screen.getAllByText(/^#\d+$/);
+    expect(ranks[0].textContent).toBe("#1");
+    expect(ranks[1].textContent).toBe("#2");
+    expect(ranks[2].textContent).toBe("#3");
+    // Alice (2000) should appear before Carol (1000), who should appear before Bob (500)
+    const allText = document.body.textContent;
+    expect(allText.indexOf("Alice")).toBeLessThan(allText.indexOf("Carol"));
+    expect(allText.indexOf("Carol")).toBeLessThan(allText.indexOf("Bob"));
+  });
+
+  it("shows Game Over heading", () => {
+    renderTV();
+    act(() => {
+      emit("game:state", {
+        state: "final",
+        players: [
+          { id: "1", name: "Alice", role: "player", avatar_color: "#FF6B6B", score: 1000 },
+        ],
+      });
+    });
+    expect(screen.getByText(/game over/i)).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Scores screen — tie and no-votes edge cases
+// ---------------------------------------------------------------------------
+
+describe("TV scores — tie and no votes", () => {
+  it("shows 'It's a tie!' when two players earn equal top scores", () => {
+    renderTV();
+    act(() => {
+      emit("game:state", {
+        state: "scores",
+        current_prompt: {
+          player_ids:   ["1", "2"],
+          submissions:  {
+            "1": { image_url: "/alice.jpg", caption: null },
+            "2": { image_url: "/bob.jpg",   caption: null },
+          },
+          votes:        { "3": "1", "4": "2" },  // one vote each → tie
+          score_deltas: { "1": 1000, "2": 1000 },
+        },
+        players: [
+          { id: "1", name: "Alice", role: "player", avatar_color: "#FF6B6B", score: 1000 },
+          { id: "2", name: "Bob",   role: "player", avatar_color: "#4ECDC4", score: 1000 },
+        ],
+      });
+    });
+    expect(screen.getByText(/it'?s a tie/i)).toBeInTheDocument();
+  });
+
+  it("does not show a '+pts' banner when it is a tie", () => {
+    renderTV();
+    act(() => {
+      emit("game:state", {
+        state: "scores",
+        current_prompt: {
+          player_ids:   ["1", "2"],
+          submissions:  {},
+          votes:        { "3": "1", "4": "2" },
+          score_deltas: { "1": 1000, "2": 1000 },
+        },
+        players: [
+          { id: "1", name: "Alice", role: "player", avatar_color: "#FF6B6B", score: 1000 },
+          { id: "2", name: "Bob",   role: "player", avatar_color: "#4ECDC4", score: 1000 },
+        ],
+      });
+    });
+    // The big round-points banner (e.g. "+1,000 pts") should not appear for ties
+    expect(screen.queryByText(/^\+[\d,]+ pts$/)).not.toBeInTheDocument();
+  });
+
+  it("shows 'No votes this round!' when nobody voted", () => {
+    renderTV();
+    act(() => {
+      emit("game:state", {
+        state: "scores",
+        current_prompt: {
+          player_ids:   ["1", "2"],
+          submissions:  {
+            "1": { image_url: "/alice.jpg", caption: null },
+            "2": { image_url: "/bob.jpg",   caption: null },
+          },
+          votes:        {},
+          score_deltas: { "1": 0, "2": 0 },
+        },
+        players: [
+          { id: "1", name: "Alice", role: "player", avatar_color: "#FF6B6B", score: 0 },
+          { id: "2", name: "Bob",   role: "player", avatar_color: "#4ECDC4", score: 0 },
+        ],
+      });
+    });
+    expect(screen.getByText(/no votes this round/i)).toBeInTheDocument();
+  });
 });

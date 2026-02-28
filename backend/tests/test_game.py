@@ -582,3 +582,91 @@ def test_start_game_excludes_tv_players_from_prompt_assignments():
         game.start_game(code, mock_io)
     all_assigned_ids = {pid for p in rooms[code]["prompts"] for pid in p["player_ids"]}
     assert "tv1" not in all_assigned_ids
+
+
+# ---------------------------------------------------------------------------
+# _make_pairs — direct unit tests
+# ---------------------------------------------------------------------------
+
+def test_make_pairs_returns_empty_for_zero_players():
+    assert game._make_pairs(0) == []
+
+
+def test_make_pairs_returns_empty_for_one_player():
+    assert game._make_pairs(1) == []
+
+
+def test_make_pairs_n2_returns_prompts_per_player_pairs():
+    """2 players → exactly PROMPTS_PER_PLAYER pairs total."""
+    pairs = game._make_pairs(2)
+    assert len(pairs) == game.PROMPTS_PER_PLAYER
+
+
+def test_make_pairs_total_length_scales_with_player_count():
+    """Total pairs = ceil(n * PROMPTS_PER_PLAYER / 2)."""
+    import math
+    for n in range(2, 8):
+        pairs = game._make_pairs(n)
+        expected = math.ceil(n * game.PROMPTS_PER_PLAYER / 2)
+        assert len(pairs) == expected, f"n={n}: got {len(pairs)}, expected {expected}"
+
+
+def test_make_pairs_all_pairs_have_distinct_indices():
+    """No pair should have the same index twice (a player vs themselves)."""
+    for n in range(2, 8):
+        for (i, j) in game._make_pairs(n):
+            assert i != j, f"n={n}: pair ({i}, {j}) has the same index"
+
+
+def test_make_pairs_each_index_appears_at_least_prompts_per_player_times():
+    """Every player index must appear in at least PROMPTS_PER_PLAYER pairs."""
+    for n in range(2, 8):
+        pairs = game._make_pairs(n)
+        counts = [0] * n
+        for (i, j) in pairs:
+            counts[i] += 1
+            counts[j] += 1
+        for idx, count in enumerate(counts):
+            assert count >= game.PROMPTS_PER_PLAYER, (
+                f"n={n}: index {idx} appears only {count} times "
+                f"(expected >= {game.PROMPTS_PER_PLAYER})"
+            )
+
+
+def test_make_pairs_indices_within_valid_range():
+    """All pair indices must be valid (0 to n-1)."""
+    for n in range(2, 8):
+        for (i, j) in game._make_pairs(n):
+            assert 0 <= i < n, f"n={n}: index {i} out of range"
+            assert 0 <= j < n, f"n={n}: index {j} out of range"
+
+
+# ---------------------------------------------------------------------------
+# load_prompts
+# ---------------------------------------------------------------------------
+
+def test_load_prompts_returns_a_list():
+    prompts = game.load_prompts()
+    assert isinstance(prompts, list)
+
+
+def test_load_prompts_all_items_are_nonempty_strings():
+    for p in game.load_prompts():
+        assert isinstance(p, str), f"Expected str, got {type(p)}"
+        assert len(p) > 0, "Prompt must be non-empty"
+
+
+def test_load_prompts_has_enough_for_largest_game():
+    """The prompt pool must be large enough for an 8-player game (12 prompts)."""
+    prompts = game.load_prompts()
+    max_pairs = game._make_pairs(8)  # ceil(8 * 3 / 2) = 12
+    assert len(prompts) >= len(max_pairs), (
+        f"Only {len(prompts)} prompts in pool, need at least {len(max_pairs)} "
+        f"for an 8-player game"
+    )
+
+
+def test_load_prompts_returns_unique_strings():
+    """All prompts in the pool should be distinct."""
+    prompts = game.load_prompts()
+    assert len(prompts) == len(set(prompts)), "Duplicate prompts found in prompts.json"
