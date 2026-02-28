@@ -544,3 +544,74 @@ describe("TV scores — tie and no votes", () => {
     expect(screen.getByText(/no votes this round/i)).toBeInTheDocument();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Voting screen — photo reveal animation
+// ---------------------------------------------------------------------------
+
+describe("TV voting screen — photo reveal animation", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function emitVoting(promptId = "pid-1", promptText = "Best photo?") {
+    emit("game:state", {
+      state: "voting",
+      prompt_number: 1,
+      total_prompts: 3,
+      current_prompt: {
+        prompt_id:   promptId,
+        player_ids:  ["1", "2"],
+        submissions: {},
+        votes:       {},
+        prompt_text: promptText,
+      },
+      players: [
+        { id: "1", name: "Alice", role: "player", avatar_color: "#FF6B6B" },
+        { id: "2", name: "Bob",   role: "player", avatar_color: "#4ECDC4" },
+      ],
+    });
+  }
+
+  it("hides photos immediately when voting begins", () => {
+    renderTV();
+    act(() => emitVoting());
+    expect(screen.getByTestId("voting-photos").style.opacity).toBe("0");
+  });
+
+  it("shows photos after 3 seconds", () => {
+    renderTV();
+    act(() => emitVoting());
+    act(() => vi.advanceTimersByTime(3000));
+    expect(screen.getByTestId("voting-photos").style.opacity).toBe("1");
+  });
+
+  it("applies a fade-in transition after 3 seconds", () => {
+    renderTV();
+    act(() => emitVoting());
+    act(() => vi.advanceTimersByTime(3000));
+    expect(screen.getByTestId("voting-photos").style.transition).toContain("opacity 3s");
+  });
+
+  it("resets to hidden when a new prompt arrives", () => {
+    renderTV();
+    act(() => emitVoting("pid-1", "First prompt"));
+    act(() => vi.advanceTimersByTime(3000));
+    expect(screen.getByTestId("voting-photos").style.opacity).toBe("1");
+
+    // Second prompt arrives
+    act(() => emitVoting("pid-2", "Second prompt"));
+    expect(screen.getByTestId("voting-photos").style.opacity).toBe("0");
+  });
+
+  it("still shows the prompt text while photos are hidden", () => {
+    renderTV();
+    act(() => emitVoting("pid-1", "Best photo?"));
+    // Before 3s — photos hidden but prompt text must be visible
+    expect(screen.getByTestId("voting-photos").style.opacity).toBe("0");
+    expect(screen.getByText(/best photo/i)).toBeInTheDocument();
+  });
+});
