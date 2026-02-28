@@ -529,3 +529,52 @@ def test_disconnect_player_not_in_any_room_is_harmless():
     c = socketio.test_client(app)
     # Disconnect without joining any room — should not raise
     c.disconnect()
+
+
+# ---------------------------------------------------------------------------
+# handle_restart (host:restart)
+# ---------------------------------------------------------------------------
+
+def test_restart_resets_room_to_lobby(client):
+    code = room_store.create_room()["code"]
+    _join_and_become_host(client, code)
+    rooms[code]["state"] = "final"
+    client.emit("host:restart", {"room_code": code})
+    client.get_received()
+    assert rooms[code]["state"] == "lobby"
+
+
+def test_restart_emits_game_state(client):
+    code = room_store.create_room()["code"]
+    _join_and_become_host(client, code)
+    rooms[code]["state"] = "final"
+    client.emit("host:restart", {"room_code": code})
+    received = client.get_received()
+    assert "game:state" in _received_names(received)
+
+
+def test_restart_requires_final_state(client):
+    code = room_store.create_room()["code"]
+    _join_and_become_host(client, code)
+    # Room is still in "lobby" — restart must be rejected
+    client.emit("host:restart", {"room_code": code})
+    received = client.get_received()
+    assert "error" in _received_names(received)
+    assert rooms[code]["state"] == "lobby"
+
+
+def test_restart_requires_host_role(client):
+    code = room_store.create_room()["code"]
+    # Alice joins as a plain player (no host:claim)
+    client.emit("player:join", {"room_code": code, "name": "Alice", "role": "player"})
+    client.get_received()
+    rooms[code]["state"] = "final"
+    client.emit("host:restart", {"room_code": code})
+    received = client.get_received()
+    assert "error" in _received_names(received)
+
+
+def test_restart_unknown_room_emits_error(client):
+    client.emit("host:restart", {"room_code": "XXXX"})
+    received = client.get_received()
+    assert "error" in _received_names(received)

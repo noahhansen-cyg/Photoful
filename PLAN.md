@@ -40,7 +40,7 @@ The server owns all state. Phones and TV are just views that re-render on every 
 LOBBY
   → (host taps Start Game, ≥2 players) → SUBMITTING
 
-SUBMITTING  (90s)
+SUBMITTING  (120s)
   All prompts are active simultaneously. Each player sees all their assigned
   prompts at once and submits a photo for each.
   → (all players submitted for all prompts, OR timer expires) → VOTING
@@ -50,7 +50,7 @@ VOTING  (30s per prompt)
   Non-competing players vote on their phone.
   → (all eligible players voted, OR timer expires) → SCORES
 
-SCORES  (10s)
+SCORES  (5s)
   TV shows both competing photos with round winner highlighted and points earned.
   No leaderboard yet — that's reserved for the end.
   → (more prompts remain) → VOTING (next prompt)
@@ -109,7 +109,8 @@ All state is in-memory (Python dicts). No database.
 | Event | Payload | Description |
 |---|---|---|
 | `player:join` | `{room_code, name, role}` | Join or rejoin a room |
-| `host:start` | `{room_code}` | Host starts the game |
+| `host:claim` | `{room_code}` | In-lobby player claims the host role |
+| `host:start` | `{room_code}` | Host starts the game (requires ≥2 players) |
 | `submit:photo` | `{room_code, prompt_id, image_url, caption?}` | Player submits a photo |
 | `submit:vote` | `{room_code, prompt_id, voted_for_id}` | Player casts a vote |
 
@@ -164,11 +165,11 @@ Photos are large — they go over HTTP, not WebSocket.
 
 ## Prompt Assignment
 
-`assign_prompts(players, num=3)`:
-- Randomly sample 3 prompts from the bank
-- Shuffle the player list once
-- For prompt i, pair players at indices `(i*2) % n` and `(i*2+1) % n`
-- This gives even distribution — every player competes in roughly equal matchups
+`assign_prompts(players)`:
+- Shuffle the player list
+- `_make_pairs(n)` generates `ceil(n × PROMPTS_PER_PLAYER / 2)` pairs using a greedy algorithm: each iteration picks the two players with the highest remaining "need" (initialised to `PROMPTS_PER_PLAYER = 3`). Ties are shuffled for variety.
+- Randomly sample that many prompts from the bank
+- Result: every player appears in exactly `PROMPTS_PER_PLAYER` matchups (one player gets `PROMPTS_PER_PLAYER + 1` when n is odd — unavoidable)
 
 ---
 
@@ -197,9 +198,9 @@ def _start_timer(room_code, seconds, callback, socketio):
 `cancel_timer(room)` kills the greenlet early (when all players act before time runs out).
 
 Timeouts:
-- Submit: 90s
+- Submit: 120s
 - Vote: 30s
-- Scores display: 10s
+- Scores display: 5s
 
 ---
 
@@ -225,7 +226,7 @@ Timeouts:
 | `backend/game.py` | `assign_prompts`, `advance_state`, `start_game`, `tally_scores`, timer helpers |
 | `backend/rooms.py` | In-memory room CRUD, `get_room_state` serialiser |
 | `backend/bots.py` | Bot players for `make devtest` — auto-submit and auto-vote |
-| `backend/prompts.json` | Bank of 24 photo prompts |
+| `backend/prompts.json` | Bank of 46 photo prompts |
 | `frontend/src/pages/TV.jsx` | All TV screens (lobby, submitting, voting, scores, final) |
 | `frontend/src/pages/Phone.jsx` | All phone screens (join, lobby, submitting, voting, scores, final) |
 | `frontend/src/pages/Home.jsx` | Create room / enter room code / host-or-player toggle |
@@ -243,19 +244,24 @@ Timeouts:
 
 ### Sprint 2 — Core Game Loop ✅
 - Host joins from phone; Start Game button requires ≥2 players
-- Prompt assignment (3 prompts, 2 players each)
+- Prompt assignment (3 prompts per player, greedy pairing algorithm)
 - Photo upload endpoint + Pillow server-side resize
-- Multi-prompt submission phase (90s, all prompts active simultaneously)
-- Voting phase per prompt (30s)
-- Scores screen shows competing photos + round winner (10s)
+- Multi-prompt submission phase (120s, all prompts active simultaneously)
+- Voting phase per prompt (30s); TV hides photos for 3s then fades them in
+- Scores screen shows competing photos + round winner (5s)
 - Final leaderboard
 - QR code in lobby (resolves local network IP automatically)
 - Socket reconnection with state restore
-- Bot players for local testing (`make devtest`)
-- Full test suite: 111 backend (pytest) + 73 frontend (vitest)
+- Bot players for local testing (`make devtest bots=N`); room code reprinted at end
+- Ctrl+C on `make dev`/`make devtest` fully stops servers (no `make stop` needed)
+- Page refresh rejoins automatically via localStorage session persistence
+- Upload error handling: 30s timeout, HTTP error check, visible error message
+- Play Again button (host only) restarts with existing players after final
+- Phone vote cards hidden for 3s to match TV reveal animation
+- Scores screen display reduced from 10s to 5s
+- Full test suite: 183 backend (pytest) + 110 frontend (vitest)
 
 ### Sprint 3 — Polish (planned)
-- Animations: dramatic photo reveal, score delta pop-in
 - Sound effects
 - Mobile UI polish (large tap targets, no zoom on input focus)
 - Room cleanup after session ends

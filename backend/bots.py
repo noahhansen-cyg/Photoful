@@ -248,6 +248,10 @@ def main():
         time.sleep(0.3)   # slight stagger so joins aren't simultaneous
 
     print(f"All {count} bots connected. Join as Host on your phone and start the game.")
+    print(f"\n{'─'*48}")
+    print(f"  Room code : {code}")
+    print(f"  TV URL    : http://localhost:5173/room/{code}/tv")
+    print(f"{'─'*48}\n")
 
     try:
         bots[0].wait()

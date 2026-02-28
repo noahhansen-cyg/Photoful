@@ -430,3 +430,82 @@ def test_add_player_does_not_mutate_input_dict():
     snapshot = dict(original)
     room_store.add_player(room["code"], original)
     assert original == snapshot
+
+
+# ---------------------------------------------------------------------------
+# reset_room
+# ---------------------------------------------------------------------------
+
+def _room_with_final_state():
+    """Return a room in 'final' state with two players, scored, and a sentinel timer."""
+    room = room_store.create_room()
+    code = room["code"]
+    room_store.add_player(code, _make_player(id="p1", socket_id="s1", name="Alice"))
+    room_store.add_player(code, _make_player(id="p2", socket_id="s2", name="Bob"))
+    rooms[code]["state"]              = "final"
+    rooms[code]["prompts"]            = [_make_prompt(["p1", "p2"])]
+    rooms[code]["current_prompt_idx"] = 1
+    rooms[code]["timer_end"]          = 9_999_999.0
+    rooms[code]["timer_greenlet"]     = "sentinel-greenlet"
+    rooms[code]["host_id"]            = "p1"
+    for p in rooms[code]["players"]:
+        p["score"] = 1000
+    return code
+
+
+def test_reset_room_returns_true():
+    code = _room_with_final_state()
+    assert room_store.reset_room(code) is True
+
+
+def test_reset_room_returns_false_for_unknown_room():
+    assert room_store.reset_room("XXXX") is False
+
+
+def test_reset_room_sets_state_to_lobby():
+    code = _room_with_final_state()
+    room_store.reset_room(code)
+    assert rooms[code]["state"] == "lobby"
+
+
+def test_reset_room_clears_prompts():
+    code = _room_with_final_state()
+    room_store.reset_room(code)
+    assert rooms[code]["prompts"] == []
+
+
+def test_reset_room_resets_prompt_index():
+    code = _room_with_final_state()
+    room_store.reset_room(code)
+    assert rooms[code]["current_prompt_idx"] == 0
+
+
+def test_reset_room_clears_timer_end():
+    code = _room_with_final_state()
+    room_store.reset_room(code)
+    assert rooms[code]["timer_end"] is None
+
+
+def test_reset_room_clears_timer_greenlet():
+    code = _room_with_final_state()
+    room_store.reset_room(code)
+    assert rooms[code]["timer_greenlet"] is None
+
+
+def test_reset_room_zeroes_all_player_scores():
+    code = _room_with_final_state()
+    room_store.reset_room(code)
+    for p in rooms[code]["players"]:
+        assert p["score"] == 0
+
+
+def test_reset_room_keeps_players():
+    code = _room_with_final_state()
+    room_store.reset_room(code)
+    assert len(rooms[code]["players"]) == 2
+
+
+def test_reset_room_preserves_host_id():
+    code = _room_with_final_state()
+    room_store.reset_room(code)
+    assert rooms[code]["host_id"] == "p1"

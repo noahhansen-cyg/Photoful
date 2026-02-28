@@ -1,0 +1,48 @@
+networks:
+  public:
+    external: true
+services:
+  backend:
+    image: python:3.14.3-alpine
+    container_name: quiplash_backend
+    restart: unless-stopped
+    working_dir: /app
+    volumes:
+      - ./backend:/app
+    environment:
+      - APP_HOST=your.domain.here
+    command: sh -c "pip install -r requirements.txt && python app.py"
+    networks:
+      - public
+      - default
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.quiplashapi.rule: "Host(`your.domain.here`) && (PathPrefix(`/api`) || PathPrefix(`/uploads`) || PathPrefix(`/socket.io`))"
+      traefik.http.routers.quiplashapi.entryPoints: websecure
+      traefik.http.routers.quiplashapi.tls.certresolver: cloudflare
+      traefik.http.routers.quiplashapi.middlewares: tinyauth
+      traefik.http.services.quiplashapi.loadbalancer.server.port: "5000"
+      traefik.docker.network: public
+
+  frontend:
+    image: node:24.13.1-alpine
+    container_name: quiplash_frontend
+    restart: unless-stopped
+    working_dir: /app
+    volumes:
+      - ./frontend:/app
+    command: sh -c "npm ci && npm run build && npx serve dist -s -l 3000"
+    depends_on:
+      - backend
+    networks:
+      - public
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.quiplash.rule: "Host(`your.domain.here`)"
+      traefik.http.routers.quiplash.entryPoints: websecure
+      traefik.http.routers.quiplash.tls.certresolver: cloudflare
+      traefik.http.routers.quiplash.middlewares: tinyauth
+      traefik.http.services.quiplash.loadbalancer.server.port: "3000"
+      traefik.docker.network: public
+      tinyauth.apps.quiplash.config.domain: your.domain.here
+      tinyauth.apps.quiplash.oauth.whitelist: "user@example.com"

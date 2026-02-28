@@ -63,7 +63,8 @@ def get_local_ip():
 
 @app.route("/api/server-info")
 def server_info():
-    return jsonify({"local_ip": get_local_ip()})
+    host = os.environ.get("APP_HOST") or get_local_ip()
+    return jsonify({"local_ip": host})
 
 
 @app.route("/api/rooms", methods=["POST"])
@@ -287,6 +288,30 @@ def handle_vote(data):
         log.info("room=%-4s event=all_voted — advancing early", code)
         game.cancel_timer(room)
         game.advance_state(code, socketio)
+
+
+@socketio.on("host:restart")
+def handle_restart(data):
+    code = data.get("room_code", "").upper()
+    sid  = request.sid[:8]
+
+    room = room_store.get_room(code)
+    if not room:
+        emit("error", {"message": "Room not found"})
+        return
+    if room["state"] != "final":
+        emit("error", {"message": "Game is not finished yet"})
+        return
+
+    sender = next((p for p in room["players"] if p["socket_id"] == request.sid), None)
+    if not sender or sender["role"] != "host":
+        emit("error", {"message": "Only the host can restart the game"})
+        return
+
+    game.cancel_timer(room)
+    room_store.reset_room(code)
+    log.info("room=%-4s event=host:restart host=%s sid=%s", code, sender["name"], sid)
+    socketio.emit("game:state", room_store.get_room_state(code), to=code)
 
 
 @socketio.on("disconnect")

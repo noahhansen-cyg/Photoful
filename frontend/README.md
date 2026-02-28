@@ -1,16 +1,36 @@
-# React + Vite
+# Frontend — Photo Quiplash
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React 18 + Vite app. Runs on `http://localhost:5173` in development.
 
-Currently, two official plugins are available:
+## Pages
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+| File | Route | Description |
+|---|---|---|
+| `Home.jsx` | `/` | Create a room (TV) or join with a code (phone) |
+| `TV.jsx` | `/room/:code/tv` | All TV screens: lobby, submitting, voting, scores, final |
+| `Phone.jsx` | `/room/:code/phone` | All phone screens: lobby, submitting, voting, scores, final |
 
-## React Compiler
+## Dev Commands
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+```bash
+npm run dev    # start dev server with HMR
+npm test       # run vitest test suite
+npm run build  # production build
+```
 
-## Expanding the ESLint configuration
+## Key Dependencies
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+| Package | Purpose |
+|---|---|
+| `react-router-dom` | Client-side routing |
+| `socket.io-client` | WebSocket connection to backend |
+| `browser-image-compression` | Compress photos client-side before upload |
+| `qrcode.react` | QR code display in lobby |
+
+## Vite Proxy
+
+In dev, `/api`, `/socket.io`, and `/uploads` are proxied to `http://localhost:5000` (see `vite.config.js`). No CORS config needed.
+
+## Tests
+
+Tests live in `src/__tests__/`. Run with `npm test` or `make test-frontend` from the repo root.

@@ -670,3 +670,40 @@ def test_load_prompts_returns_unique_strings():
     """All prompts in the pool should be distinct."""
     prompts = game.load_prompts()
     assert len(prompts) == len(set(prompts)), "Duplicate prompts found in prompts.json"
+
+
+# ---------------------------------------------------------------------------
+# Timeout constants
+# ---------------------------------------------------------------------------
+
+def test_submit_timeout_is_120_seconds():
+    assert game.SUBMIT_TIMEOUT == 120, (
+        f"SUBMIT_TIMEOUT is {game.SUBMIT_TIMEOUT}s — expected 120s"
+    )
+
+
+def test_start_game_timer_end_is_submit_timeout_from_now():
+    """timer_end should be approximately now + SUBMIT_TIMEOUT."""
+    import time as _time
+    code, _ = _room_with_n_players(2)
+    mock_io = _mock_socketio()
+    before = _time.time()
+    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+        game.start_game(code, mock_io)
+    after = _time.time()
+    expected_min = before + game.SUBMIT_TIMEOUT
+    expected_max = after  + game.SUBMIT_TIMEOUT
+    assert expected_min <= rooms[code]["timer_end"] <= expected_max, (
+        f"timer_end {rooms[code]['timer_end']:.2f} not in "
+        f"[{expected_min:.2f}, {expected_max:.2f}]"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Timeout constants — SCORES_TIMEOUT
+# ---------------------------------------------------------------------------
+
+def test_scores_timeout_is_5_seconds():
+    assert game.SCORES_TIMEOUT == 5, (
+        f"SCORES_TIMEOUT is {game.SCORES_TIMEOUT}s — expected 5s"
+    )

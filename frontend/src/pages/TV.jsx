@@ -138,7 +138,7 @@ function SubmittingScreen({ gameState, players, timeLeft }) {
     <div style={styles.centered}>
       <h2 style={styles.bigLabel}>Players are taking photos...</h2>
       <p style={styles.hint}>{totalReceived} / {totalExpected} photos submitted</p>
-      <TimerBar timeLeft={timeLeft} total={90} />
+      <TimerBar timeLeft={timeLeft} total={120} />
       <div style={styles.promptProgressGrid}>
         {allPrompts.map((prompt, i) => (
           <div key={prompt.prompt_id} style={styles.promptProgressRow}>
@@ -174,6 +174,15 @@ function VotingScreen({ gameState, players, timeLeft }) {
   const voteCount   = (pid) => Object.values(votes).filter(v => v === pid).length;
   const getPlayer   = (id) => players.find(p => p.id === id);
 
+  const [photosVisible, setPhotosVisible] = useState(false);
+  const promptId = prompt?.prompt_id;
+
+  useEffect(() => {
+    setPhotosVisible(false);
+    const t = setTimeout(() => setPhotosVisible(true), 3000);
+    return () => clearTimeout(t);
+  }, [promptId]);
+
   return (
     <div style={styles.centered}>
       <div style={styles.promptBadge}>
@@ -181,7 +190,7 @@ function VotingScreen({ gameState, players, timeLeft }) {
       </div>
       <h2 style={styles.promptText}>{prompt?.prompt_text}</h2>
       <TimerBar timeLeft={timeLeft} total={30} />
-      <div style={styles.photoRow}>
+      <div data-testid="voting-photos" style={{ ...styles.photoRow, opacity: photosVisible ? 1 : 0, transition: photosVisible ? "opacity 3s ease-in" : "none" }}>
         {playerIds.map(pid => {
           const sub    = submissions[pid];
           const player = getPlayer(pid);
@@ -233,7 +242,7 @@ function ScoresScreen({ gameState, players, timeLeft }) {
       {maxDelta > 0 && !isTie && (
         <p style={styles.roundPoints}>+{maxDelta.toLocaleString()} pts</p>
       )}
-      <TimerBar timeLeft={timeLeft} total={10} />
+      <TimerBar timeLeft={timeLeft} total={5} />
       <div style={styles.photoRow}>
         {playerIds.map(pid => {
           const sub      = submissions[pid];
@@ -283,6 +292,7 @@ function FinalScreen({ players }) {
           </div>
         ))}
       </div>
+      <p style={styles.hint}>Host can tap "Play Again?" on their phone to restart</p>
     </div>
   );
 }

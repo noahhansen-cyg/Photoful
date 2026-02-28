@@ -6,10 +6,21 @@ import socket from "../socket";
 export default function Phone() {
   const { code } = useParams();
 
-  const [name, setName]             = useState("");
-  const [joined, setJoined]         = useState(false);
-  const [myPlayerId, setMyPlayerId]  = useState(null);
-  const [myRole, setMyRole]         = useState("player");
+  // Restore a previous session from localStorage so a page refresh rejoins
+  // automatically without sending the player back to the name-entry screen.
+  const [savedSession] = useState(() => {
+    try {
+      const raw = localStorage.getItem(`pq_session_${code}`);
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  const [name, setName]             = useState(savedSession?.name ?? "");
+  const [joined, setJoined]         = useState(!!savedSession);
+  const [myPlayerId, setMyPlayerId]  = useState(savedSession?.myPlayerId ?? null);
+  const [myRole, setMyRole]         = useState(savedSession?.myRole ?? "player");
   const [gameState, setGameState]   = useState(null);
   const [error, setError]           = useState("");
   const [timeLeft, setTimeLeft]     = useState(null);
@@ -17,25 +28,44 @@ export default function Phone() {
   // Keep role in a ref so reconnect handler always uses the current value
   // (the useEffect closure would otherwise capture the stale "player" role
   // if the player later claims host).
-  const roleRef = useRef("player");
+  const roleRef = useRef(savedSession?.myRole ?? "player");
+  // Track whether we auto-joined from localStorage so we can recover cleanly
+  // if the session is stale (e.g. server restarted, room gone).
+  const autoJoinRef = useRef(!!savedSession);
 
   // Wire up socket after joining
   useEffect(() => {
     if (!joined) return;
     socket.connect();
-    socket.emit("player:join", { room_code: code, name, role: "player" });
+    socket.emit("player:join", { room_code: code, name, role: roleRef.current });
 
     socket.on("connect", () => {
       // Re-join room on reconnect — server-side room membership is lost on disconnect
       socket.emit("player:join", { room_code: code, name, role: roleRef.current });
     });
     socket.on("player:self", ({ player_id, role }) => {
+      autoJoinRef.current = false; // rejoined successfully, clear stale-session guard
       setMyPlayerId(player_id);
       setMyRole(role);
       roleRef.current = role;
+      localStorage.setItem(`pq_session_${code}`, JSON.stringify({ name, myPlayerId: player_id, myRole: role }));
     });
     socket.on("game:state", setGameState);
-    socket.on("error", ({ message }) => setError(message));
+    socket.on("error", ({ message }) => {
+      setError(message);
+      // If we auto-joined from a saved session and got an error before receiving
+      // player:self, the session is stale (server restarted / room gone).
+      // Clear it and fall back to the name-entry screen.
+      if (autoJoinRef.current) {
+        autoJoinRef.current = false;
+        localStorage.removeItem(`pq_session_${code}`);
+        setJoined(false);
+        setName("");
+        setMyPlayerId(null);
+        setMyRole("player");
+        roleRef.current = "player";
+      }
+    });
 
     return () => {
       socket.off("connect");
@@ -110,7 +140,7 @@ export default function Phone() {
       {state === "submitting" && <SubmittingScreen code={code} allPrompts={allPrompts} myPlayerId={myPlayerId} timeLeft={timeLeft} />}
       {state === "voting"     && <VotingScreen code={code} prompt={prompt} myPlayerId={myPlayerId} isAssigned={isAssigned} players={players} />}
       {state === "scores"     && <ScoresScreen gameState={gameState} players={players} myPlayerId={myPlayerId} />}
-      {state === "final"      && <FinalScreen players={players} myPlayerId={myPlayerId} />}
+      {state === "final"      && <FinalScreen players={players} myPlayerId={myPlayerId} myRole={myRole} code={code} />}
     </div>
   );
 }
@@ -201,23 +231,36 @@ function SubmittingScreen({ code, allPrompts, myPlayerId, timeLeft }) {
 }
 
 function PromptSubmitCard({ code, prompt, myPlayerId }) {
-  const [imageFile, setImageFile] = useState(null);
-  const [preview, setPreview]     = useState(null);
-  const [caption, setCaption]     = useState("");
-  const [uploading, setUploading] = useState(false);
-  const [submitted, setSubmitted] = useState(false);
+  const [imageFile, setImageFile]   = useState(null);
+  const [preview, setPreview]       = useState(null);
+  const [caption, setCaption]       = useState("");
+  const [uploading, setUploading]   = useState(false);
+  const [submitted, setSubmitted]   = useState(false);
+  const [uploadError, setUploadError] = useState("");
 
   const alreadySubmitted = prompt?.submissions?.[myPlayerId];
 
   async function handleSubmit() {
     if (!imageFile || uploading) return;
     setUploading(true);
+    setUploadError("");
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30000);
     try {
       const compressed = await imageCompression(imageFile, { maxSizeMB: 1, maxWidthOrHeight: 1280 });
       const form = new FormData();
       form.append("photo", compressed, "photo.jpg");
-      const res  = await fetch(`/api/rooms/${code}/upload`, { method: "POST", body: form });
+      const res = await fetch(`/api/rooms/${code}/upload`, {
+        method: "POST",
+        body: form,
+        signal: controller.signal,
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `Upload failed (${res.status})`);
+      }
       const data = await res.json();
+      if (!data.image_url) throw new Error("No image URL returned");
       socket.emit("submit:photo", {
         room_code: code,
         prompt_id: prompt.prompt_id,
@@ -227,7 +270,9 @@ function PromptSubmitCard({ code, prompt, myPlayerId }) {
       setSubmitted(true);
     } catch (e) {
       console.error(e);
+      setUploadError(e.name === "AbortError" ? "Upload timed out — tap to try again." : "Upload failed — tap to try again.");
     } finally {
+      clearTimeout(timeout);
       setUploading(false);
     }
   }
@@ -279,6 +324,8 @@ function PromptSubmitCard({ code, prompt, myPlayerId }) {
         maxLength={80}
       />
 
+      {uploadError && <p style={styles.error}>{uploadError}</p>}
+
       <button
         style={styles.submitBtn(!!imageFile && !uploading)}
         onClick={handleSubmit}
@@ -295,8 +342,18 @@ function PromptSubmitCard({ code, prompt, myPlayerId }) {
 // ---------------------------------------------------------------------------
 
 function VotingScreen({ code, prompt, myPlayerId, isAssigned, players }) {
-  const [voted, setVoted] = useState(false);
+  const [voted, setVoted]           = useState(false);
+  const [photosReady, setPhotosReady] = useState(false);
+  const promptId = prompt?.prompt_id;
   const alreadyVoted = prompt?.votes?.[myPlayerId];
+
+  // Mirror the TV's 3-second reveal delay so photos aren't visible on phones
+  // while the TV is still fading them in.
+  useEffect(() => {
+    setPhotosReady(false);
+    const t = setTimeout(() => setPhotosReady(true), 3000);
+    return () => clearTimeout(t);
+  }, [promptId]);
 
   if (isAssigned) {
     return (
@@ -312,6 +369,15 @@ function VotingScreen({ code, prompt, myPlayerId, isAssigned, players }) {
       <div style={styles.section}>
         <div style={styles.bigCheck}>✓</div>
         <p style={styles.label}>Vote cast!</p>
+      </div>
+    );
+  }
+
+  if (!photosReady) {
+    return (
+      <div style={styles.section}>
+        <p style={styles.label}>Photos are being revealed...</p>
+        <p style={styles.hint}>Voting opens in a moment</p>
       </div>
     );
   }
@@ -388,10 +454,14 @@ function ScoresScreen({ gameState, players, myPlayerId }) {
 // Final
 // ---------------------------------------------------------------------------
 
-function FinalScreen({ players, myPlayerId }) {
+function FinalScreen({ players, myPlayerId, myRole, code }) {
   const sorted = [...players].sort((a, b) => b.score - a.score);
   const winner = sorted[0];
   const iWon   = winner?.id === myPlayerId;
+
+  function playAgain() {
+    socket.emit("host:restart", { room_code: code });
+  }
 
   return (
     <div style={styles.section}>
@@ -406,6 +476,11 @@ function FinalScreen({ players, myPlayerId }) {
           </div>
         ))}
       </div>
+      {myRole === "host" && (
+        <button style={styles.bigBtn} onClick={playAgain}>
+          Play Again?
+        </button>
+      )}
     </div>
   );
 }
