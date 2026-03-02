@@ -7,6 +7,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from PIL import Image as PILImage
 from app import app
+import app as app_module
 from rooms import rooms
 
 
@@ -187,3 +188,41 @@ def test_server_info_returns_local_ip(client):
     # Should be a non-empty string (either a real IP or the "localhost" fallback)
     assert isinstance(data["local_ip"], str)
     assert len(data["local_ip"]) > 0
+
+
+# ---------------------------------------------------------------------------
+# GET /healthz
+# ---------------------------------------------------------------------------
+
+def test_healthz_returns_200(client):
+    response = client.get("/healthz")
+    assert response.status_code == 200
+
+
+def test_healthz_body_is_ok(client):
+    response = client.get("/healthz")
+    assert response.data == b"ok"
+
+
+# ---------------------------------------------------------------------------
+# Packaging helpers — dev-mode behaviour
+# ---------------------------------------------------------------------------
+
+def test_not_frozen_in_dev():
+    """In a normal Python process (not a PyInstaller bundle) _FROZEN must be False."""
+    assert app_module._FROZEN is False
+
+
+def test_async_mode_is_gevent_in_dev():
+    """Dev mode must use gevent so the existing make-dev workflow is unchanged."""
+    assert app_module.ASYNC_MODE == "gevent"
+
+
+def test_frontend_dist_is_none_in_dev():
+    """_FRONTEND_DIST must be None outside a frozen bundle (SPA route not registered)."""
+    assert app_module._FRONTEND_DIST is None
+
+
+def test_upload_dir_exists():
+    """UPLOADS_DIR must exist as a directory immediately after module import."""
+    assert os.path.isdir(app_module.UPLOADS_DIR)

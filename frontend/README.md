@@ -1,6 +1,6 @@
 # Frontend — Photo Quiplash
 
-React 18 + Vite app. Runs on `http://localhost:5173` in development.
+React 19 + Vite app. Runs on `http://localhost:5173` in development; served directly by the Flask backend in the packaged executable.
 
 ## Pages
 
@@ -13,9 +13,9 @@ React 18 + Vite app. Runs on `http://localhost:5173` in development.
 ## Dev Commands
 
 ```bash
-npm run dev    # start dev server with HMR
+npm run dev    # start dev server with HMR on :5173
 npm test       # run vitest test suite
-npm run build  # production build
+npm run build  # production build → frontend/dist/
 ```
 
 ## Key Dependencies
@@ -31,6 +31,12 @@ npm run build  # production build
 
 In dev, `/api`, `/socket.io`, and `/uploads` are proxied to `http://localhost:5000` (see `vite.config.js`). No CORS config needed.
 
+In the packaged binary, Flask serves everything from the same origin so no proxy is involved.
+
 ## Tests
 
 Tests live in `src/__tests__/`. Run with `npm test` or `make test-frontend` from the repo root.
+
+## Production Build
+
+`npm run build` outputs to `frontend/dist/`. In the packaged app, the PyInstaller binary bundles this directory and Flask serves it via a catch-all route. React Router handles all client-side navigation after the initial page load.

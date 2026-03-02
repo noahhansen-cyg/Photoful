@@ -265,9 +265,174 @@ Timeouts:
 - Sound effects
 - Mobile UI polish (large tap targets, no zoom on input focus)
 - Room cleanup after session ends
+- **Main menu** (see Sprint 5 — Distribution for detail)
 
 ### Sprint 4 — Production (planned)
 - Deploy to Fly.io
 - Move image storage to Cloudflare R2 or AWS S3
 - Rate limiting on uploads
 - Optional NSFW content moderation
+
+### Sprint 5 — Distribution (planned)
+- Package as a standalone executable (Windows + macOS)
+- Steam launcher compatibility
+- Main menu screen
+- Online multiplayer (play over the internet, not just LAN)
+- Local/Online mode toggle
+
+---
+
+## Sprint 5 — Distribution Detail
+
+The four items below all stem from the same goal: turn the current "run in a terminal"
+dev build into a packaged desktop app anyone can launch from Steam or a game launcher,
+with both a LAN mode (current behaviour) and an internet mode.
+
+---
+
+### 5a — Executable Packaging
+
+**Goal:** A double-clickable binary that boots the Flask server and opens the game UI
+in a window (or browser tab) without the user needing Python, Node, or a terminal.
+
+**Recommended approach — Electron wrapper:**
+
+```
+electron/
+  main.js          # Electron entry point
+  preload.js       # optional — bridge to renderer context
+```
+
+1. Build the Vite frontend to `frontend/dist/` (`npm run build`).
+2. Bundle the Flask backend + Python dependencies with **PyInstaller** into a single
+   binary (`backend/dist/server`). The Flask app then serves the built static files
+   from `frontend/dist/` instead of relying on Vite dev server.
+3. Electron `main.js`:
+   - Spawns the PyInstaller binary as a child process.
+   - Waits for the server to be ready (poll `http://localhost:5000/healthz`).
+   - Opens a `BrowserWindow` pointing at `http://localhost:5000`.
+   - On app quit, kills the server child process.
+4. Use **electron-builder** to produce a platform installer:
+   - Windows: `.exe` NSIS installer
+   - macOS: `.dmg` / `.app` bundle
+
+**Alternative — browser-only (no Electron):**
+If a native window is not required, PyInstaller alone can bundle the Flask server.
+At launch it opens `http://localhost:5000` in the user's default browser. Simpler,
+but no custom window chrome and the browser tab can be closed accidentally.
+
+**Steam compatibility:**
+Steam just needs a launchable executable. The Electron `.exe` or the PyInstaller
+binary can be set as the game's launch target in Steamworks. No special SDK
+integration is required unless you want Steam achievements or the overlay.
+
+**New files:**
+- `electron/main.js`
+- `electron/package.json`
+- `Makefile` targets: `make build-backend`, `make build-frontend`, `make build-electron`, `make package`
+
+---
+
+### 5b — Main Menu
+
+**Goal:** A home screen shown immediately on launch (instead of the raw "create/join"
+room form) that acts as the game's entry point.
+
+**Screens:**
+
+```
+┌─────────────────────────────────┐
+│       📸  Photo Quiplash        │
+│                                 │
+│   [ Play Online  ]              │
+│   [ Play Local   ]              │
+│                                 │
+│         Settings ⚙              │
+└─────────────────────────────────┘
+```
+
+- **Play Online** — navigates to the existing Home page with a connection preset
+  pointing at the cloud/relay server.
+- **Play Local** — navigates to the existing Home page with a connection preset
+  pointing at `localhost:5000` (the embedded server).
+- **Settings** — volume, display preferences (future).
+
+**Implementation:**
+- New route `/` → `MainMenu.jsx` component.
+- Existing Home.jsx becomes `/room` (create/join step).
+- The chosen mode is stored in React context (or a tiny Zustand/jotai store) and
+  read by `socket.js` to determine which server URL to connect to.
+- The Electron main process can pass the mode via a query param on launch
+  (`?mode=local` or `?mode=online`) to pre-select without user input.
+
+---
+
+### 5c — Online Multiplayer
+
+**Goal:** Players can join a game hosted by someone on a completely different network —
+no port forwarding, no shared Wi-Fi required.
+
+**Recommended approach — Cloud-hosted relay (simplest, most reliable):**
+
+The entire Flask app is deployed to a cloud service (Fly.io is already planned for
+Sprint 4). Players connect their phones to the cloud URL; the host creates a room
+there just like on LAN. No P2P, no tunnelling, no NAT traversal.
+
+```
+Host PC (Electron app, Online mode)
+  └─ connects to https://photoquiplash.fly.dev
+       └─ creates room, gets room code
+
+Player phones
+  └─ open https://photoquiplash.fly.dev
+       └─ enter room code → join
+```
+
+The Electron app in Online mode is essentially a thin client that navigates to the
+cloud URL (or opens it in the embedded BrowserWindow). The embedded Flask server
+is **not** started in Online mode.
+
+**Alternative — Cloudflare Tunnel / ngrok (host runs server locally):**
+
+The host's Flask server runs locally, and a tunnel (e.g. `cloudflared tunnel` or
+`ngrok http 5000`) exposes it on a public HTTPS URL. The host shares the URL /
+room code with players.
+
+Pros: no cloud hosting cost, game logic stays on host hardware.
+Cons: requires the host to be running during the whole session; tunnel services
+have bandwidth limits; URL changes each session unless a paid plan is used.
+
+This could be automated inside the Electron app:
+1. Spawn `cloudflared` alongside the Flask server.
+2. Parse the tunnel URL from its stdout.
+3. Display it in the main menu / lobby QR code.
+
+**Chosen approach for Sprint 5:** Start with the cloud relay (deploy to Fly.io).
+The Cloudflare Tunnel option can be added as a fallback or power-user feature later.
+
+---
+
+### 5d — Local / Online Mode Toggle
+
+**Goal:** Players without internet (e.g. party at a cabin, convention floor) can still
+play in LAN mode. Online is the default for ease; Local can be selected at the main menu.
+
+**Behaviour difference:**
+
+| | Online mode | Local mode |
+|---|---|---|
+| Flask server | NOT started (connects to cloud) | Started on `localhost:5000` |
+| Room creation | On cloud server | On embedded server |
+| QR code | Points to cloud URL | Points to local network IP (current behaviour) |
+| Internet required | Yes | No (LAN only) |
+| Player join URL | `https://photoquiplash.fly.dev` | `http://192.168.x.x:5000` |
+
+**Implementation:**
+- `socket.js` reads a `MODE` env/config value: `"online"` → connects to cloud URL;
+  `"local"` → connects to `http://localhost:5000`.
+- Electron main process sets the mode based on user selection in `MainMenu.jsx`
+  (passed as an environment variable or IPC message to the renderer).
+- In non-Electron (plain browser) builds, the mode toggle can live as a settings
+  page or URL param for development.
+- The QR code component (`TV.jsx`) already reads the server's reported LAN IP;
+  in Online mode it will display the cloud URL instead.

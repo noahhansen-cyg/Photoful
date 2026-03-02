@@ -1,10 +1,19 @@
-import gevent.monkey
-gevent.monkey.patch_all()
+import sys
+import os
+
+# ---------------------------------------------------------------------------
+# Async mode — use threading in the packaged binary to avoid gevent+PyInstaller
+# incompatibilities; use gevent in development (unchanged behaviour).
+# ---------------------------------------------------------------------------
+_FROZEN = getattr(sys, "frozen", False)
+ASYNC_MODE = "threading" if _FROZEN else os.environ.get("ASYNC_MODE", "gevent")
+if ASYNC_MODE == "gevent":
+    import gevent.monkey
+    gevent.monkey.patch_all()
 
 import uuid
 import random
 import logging
-import os
 import socket
 from flask import Flask, request, jsonify, send_from_directory
 from flask_socketio import SocketIO, emit, join_room
@@ -30,10 +39,40 @@ app = Flask(__name__)
 app.config["SECRET_KEY"] = "dev-secret-change-in-prod"
 
 CORS(app, resources={r"/api/*": {"origins": "*"}})
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode="gevent")
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode=ASYNC_MODE)
 
-UPLOADS_DIR = os.path.join(os.path.dirname(__file__), "uploads")
-os.makedirs(UPLOADS_DIR, exist_ok=True)
+
+def _get_upload_dir():
+    """Return a writable uploads directory.
+
+    In a PyInstaller bundle sys._MEIPASS is read-only, so we use a
+    platform-appropriate user-data directory instead.
+    """
+    if _FROZEN:
+        if sys.platform == "darwin":
+            base = os.path.expanduser("~/Library/Application Support/PhotoQuiplash")
+        elif sys.platform == "win32":
+            base = os.path.join(os.environ.get("APPDATA", "~"), "PhotoQuiplash")
+        else:
+            base = os.path.expanduser("~/.photoquiplash")
+        d = os.path.join(base, "uploads")
+    else:
+        d = os.path.join(os.path.dirname(__file__), "uploads")
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+UPLOADS_DIR = _get_upload_dir()
+
+
+def _get_frontend_dist():
+    """Return the path to the built React app, or None in dev mode."""
+    if _FROZEN:
+        return os.path.join(sys._MEIPASS, "frontend_dist")
+    return None
+
+
+_FRONTEND_DIST = _get_frontend_dist()
 
 AVATAR_COLORS = [
     "#FF6B6B", "#4ECDC4", "#45B7D1", "#96CEB4",
@@ -112,6 +151,12 @@ def upload_photo(code):
 @app.route("/uploads/<path:filename>")
 def serve_upload(filename):
     return send_from_directory(UPLOADS_DIR, filename)
+
+
+@app.route("/healthz")
+def healthz():
+    """Liveness probe — Electron polls this before opening the BrowserWindow."""
+    return "ok", 200
 
 
 # ---------------------------------------------------------------------------
@@ -324,6 +369,23 @@ def handle_disconnect():
         socketio.emit("game:state", room_store.get_room_state(code), to=code)
     else:
         log.debug("event=disconnect sid=%s (no room found)", sid)
+
+
+# ---------------------------------------------------------------------------
+# Serve the built React SPA — only active in the packaged binary.
+# All /api/ and /uploads/ routes take precedence because they are registered
+# first and Flask's routing engine prefers more-specific rules.
+# ---------------------------------------------------------------------------
+
+if _FRONTEND_DIST:
+    @app.route("/", defaults={"path": ""})
+    @app.route("/<path:path>")
+    def serve_react(path):
+        full = os.path.join(_FRONTEND_DIST, path)
+        if path and os.path.exists(full):
+            return send_from_directory(_FRONTEND_DIST, path)
+        # Fall back to index.html so React Router handles client-side routing.
+        return send_from_directory(_FRONTEND_DIST, "index.html")
 
 
 # ---------------------------------------------------------------------------
