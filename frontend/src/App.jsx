@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import MainMenu from "./pages/MainMenu";
+import Options from "./pages/Options";
 import Home from "./pages/Home";
 import TV from "./pages/TV";
 import Phone from "./pages/Phone";
@@ -9,6 +10,7 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<MainMenu />} />
+        <Route path="/options" element={<Options />} />
         <Route path="/join" element={<Home />} />
         <Route path="/room/:code/tv" element={<TV />} />
         <Route path="/room/:code/phone" element={<Phone />} />
