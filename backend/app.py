@@ -392,4 +392,14 @@ if _FRONTEND_DIST:
 
 if __name__ == "__main__":
     log.info("Starting Photo Quiplash server on :5000")
-    socketio.run(app, host="0.0.0.0", port=5000, debug=True, use_reloader=False)
+    # In the packaged binary (threading mode) Werkzeug raises an error unless
+    # allow_unsafe_werkzeug=True is passed and debug is off.  In dev, gevent
+    # replaces the Werkzeug server entirely so debug=True is fine.
+    socketio.run(
+        app,
+        host="0.0.0.0",
+        port=5000,
+        debug=not _FROZEN,
+        use_reloader=False,
+        allow_unsafe_werkzeug=_FROZEN,
+    )
