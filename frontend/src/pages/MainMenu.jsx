@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
+
 export default function MainMenu() {
   const [loading, setLoading] = useState(false);
   const [error, setError]     = useState("");
@@ -33,7 +34,7 @@ export default function MainMenu() {
           {loading ? "Starting…" : "Play"}
         </button>
 
-        <button style={styles.inactiveBtn} disabled>
+        <button style={styles.menuBtn} onClick={() => navigate("/options")}>
           Options
         </button>
 
@@ -78,6 +79,17 @@ const styles = {
     background: "#6c63ff",
     color: "#fff",
     border: "none",
+    borderRadius: "8px",
+    cursor: "pointer",
+    letterSpacing: "0.05em",
+  },
+  menuBtn: {
+    padding: "1rem",
+    fontSize: "1.3rem",
+    fontWeight: "bold",
+    background: "#1e1e30",
+    color: "#ccc",
+    border: "2px solid #3a3a55",
     borderRadius: "8px",
     cursor: "pointer",
     letterSpacing: "0.05em",

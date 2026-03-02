@@ -55,15 +55,27 @@ describe("MainMenu rendering", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Options navigation
+// ---------------------------------------------------------------------------
+
+describe("Options", () => {
+  it("Options button is enabled", () => {
+    renderMenu();
+    expect(screen.getByRole("button", { name: /^options$/i })).not.toBeDisabled();
+  });
+
+  it("navigates to /options when Options is clicked", async () => {
+    renderMenu();
+    await userEvent.click(screen.getByRole("button", { name: /^options$/i }));
+    expect(mockNavigate).toHaveBeenCalledWith("/options");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Inactive buttons
 // ---------------------------------------------------------------------------
 
 describe("Inactive buttons", () => {
-  it("Options button is disabled", () => {
-    renderMenu();
-    expect(screen.getByRole("button", { name: /^options$/i })).toBeDisabled();
-  });
-
   it("Credits button is disabled", () => {
     renderMenu();
     expect(screen.getByRole("button", { name: /^credits$/i })).toBeDisabled();
