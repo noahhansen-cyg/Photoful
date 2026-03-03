@@ -267,18 +267,17 @@ Timeouts:
 - Room cleanup after session ends
 - **Main menu** (see Sprint 5 — Distribution for detail)
 
-### Sprint 4 — Production (planned)
-- Deploy to Fly.io
-- Move image storage to Cloudflare R2 or AWS S3
-- Rate limiting on uploads
-- Optional NSFW content moderation
+### Sprint 4 — Production (absorbed into Sprint 5c/5d)
+- Deploy to Railway (replaces original Fly.io plan — simpler setup)
+- Image storage: ephemeral disk initially, Cloudflare R2 later if needed
+- Rate limiting on uploads (future)
+- Optional NSFW content moderation (future)
 
-### Sprint 5 — Distribution (planned)
-- Package as a standalone executable (Windows + macOS)
-- Steam launcher compatibility
-- Main menu screen
-- Online multiplayer (play over the internet, not just LAN)
-- Local/Online mode toggle
+### Sprint 5 — Distribution (in progress)
+- ✅ 5a — Executable Packaging (Electron + PyInstaller)
+- ✅ 5b — Main Menu + Settings page
+- **5c — Deploy cloud service** (next)
+- **5d — Local / Online mode toggle** (follows 5c)
 
 ---
 
@@ -367,72 +366,85 @@ room form) that acts as the game's entry point.
 
 ---
 
-### 5c — Online Multiplayer
+### 5c — Deploy Cloud Service
 
-**Goal:** Players can join a game hosted by someone on a completely different network —
-no port forwarding, no shared Wi-Fi required.
+**Goal:** The Flask app runs permanently on a cloud server so players on any network
+can join without port forwarding, tunnelling, or a locally running server.
 
-**Recommended approach — Cloud-hosted relay (simplest, most reliable):**
+**Platform: Railway**
 
-The entire Flask app is deployed to a cloud service (Fly.io is already planned for
-Sprint 4). Players connect their phones to the cloud URL; the host creates a room
-there just like on LAN. No P2P, no tunnelling, no NAT traversal.
+Railway is chosen over Fly.io (more config) and Render (free tier sleeps after
+15 min inactivity, which breaks a game lobby).
 
 ```
-Host PC (Electron app, Online mode)
-  └─ connects to https://photoquiplash.fly.dev
-       └─ creates room, gets room code
-
-Player phones
-  └─ open https://photoquiplash.fly.dev
-       └─ enter room code → join
+Cost: ~$5/month (Hobby plan, always-on)
+WebSockets: supported natively
+Disk: 1 GB persistent volume for /uploads (or ephemeral — fine for party game)
+Deploy: git push → auto-redeploy
 ```
 
-The Electron app in Online mode is essentially a thin client that navigates to the
-cloud URL (or opens it in the embedded BrowserWindow). The embedded Flask server
-is **not** started in Online mode.
+**Architecture after 5c:**
 
-**Alternative — Cloudflare Tunnel / ngrok (host runs server locally):**
+```
+Railway (always on)
+  Flask :$PORT  ─── serves React SPA + API + WebSocket
+      │
+      ├─ https://photo-quiplash.up.railway.app/          TV browser tab
+      ├─ https://photo-quiplash.up.railway.app/room/TV   TV screen
+      └─ https://photo-quiplash.up.railway.app/room/XXXX/phone   player phone
 
-The host's Flask server runs locally, and a tunnel (e.g. `cloudflared tunnel` or
-`ngrok http 5000`) exposes it on a public HTTPS URL. The host shares the URL /
-room code with players.
+Electron app (Online mode)
+  └─ BrowserWindow → https://photo-quiplash.up.railway.app
+     (no local Flask spawned)
+```
 
-Pros: no cloud hosting cost, game logic stays on host hardware.
-Cons: requires the host to be running during the whole session; tunnel services
-have bandwidth limits; URL changes each session unless a paid plan is used.
+**Files to add / change:**
 
-This could be automated inside the Electron app:
-1. Spawn `cloudflared` alongside the Flask server.
-2. Parse the tunnel URL from its stdout.
-3. Display it in the main menu / lobby QR code.
+| File | Change |
+|---|---|
+| `backend/requirements.txt` | Add `gunicorn` |
+| `Procfile` | `web: gunicorn --worker-class geventwebsocket.gunicorn.workers.GeventWebSocketWorker --workers 1 --bind 0.0.0.0:$PORT backend.app:app` |
+| `railway.toml` | Build command: `cd frontend && npm ci && npm run build`; start: `gunicorn ...` |
+| `backend/app.py` | Read `PORT` from env (default 5000); remove `_FROZEN`/PyInstaller upload-dir logic (keep for local mode — conditional on `_FROZEN`) |
+| `electron/main.js` | Online mode: skip spawning local server, navigate BrowserWindow to cloud URL |
+| `frontend/src/socket.js` | Connect to cloud URL when in Online mode (via `VITE_SERVER_URL` env var or window.location) |
+| `frontend/src/pages/TV.jsx` | QR code uses `window.location.origin` (stable cloud URL — no polling needed) |
 
-**Chosen approach for Sprint 5:** Start with the cloud relay (deploy to Fly.io).
-The Cloudflare Tunnel option can be added as a fallback or power-user feature later.
+**Photo uploads:**
+- Store to `UPLOADS_DIR` (same code as local). On Railway, this is ephemeral disk by
+  default — photos survive the game session but are wiped on redeploy. Fine for a party game.
+- To persist across deploys: mount a Railway volume at `/uploads`.
+- Cloud storage (R2/S3) is a future upgrade, not needed now.
+
+**QR code simplification:**
+In Online mode the server URL is static (`window.location.origin`), so `TV.jsx`
+no longer needs to poll `/api/server-info`. The QR code renders immediately with
+`${window.location.origin}/room/${code}/phone`.
 
 ---
 
 ### 5d — Local / Online Mode Toggle
 
-**Goal:** Players without internet (e.g. party at a cabin, convention floor) can still
-play in LAN mode. Online is the default for ease; Local can be selected at the main menu.
+**Goal:** Players without internet (cabin, convention floor) can still play in LAN
+mode. Online is the default; Local is selectable from the main menu.
 
 **Behaviour difference:**
 
 | | Online mode | Local mode |
 |---|---|---|
-| Flask server | NOT started (connects to cloud) | Started on `localhost:5000` |
+| Flask server | NOT started | Started on `localhost:5000` |
 | Room creation | On cloud server | On embedded server |
-| QR code | Points to cloud URL | Points to local network IP (current behaviour) |
+| QR code | `window.location.origin/room/…` (immediate) | Local IP from `/api/server-info` |
 | Internet required | Yes | No (LAN only) |
-| Player join URL | `https://photoquiplash.fly.dev` | `http://192.168.x.x:5000` |
+| Player join URL | `https://photo-quiplash.up.railway.app` | `http://192.168.x.x:5000` |
 
 **Implementation:**
-- `socket.js` reads a `MODE` env/config value: `"online"` → connects to cloud URL;
-  `"local"` → connects to `http://localhost:5000`.
-- Electron main process sets the mode based on user selection in `MainMenu.jsx`
-  (passed as an environment variable or IPC message to the renderer).
-- In non-Electron (plain browser) builds, the mode toggle can live as a settings
-  page or URL param for development.
-- The QR code component (`TV.jsx`) already reads the server's reported LAN IP;
-  in Online mode it will display the cloud URL instead.
+- `MainMenu.jsx` already has Play Online / Play Local buttons (Sprint 5b stub).
+- Electron passes `?mode=online` or `?mode=local` as a query param (or IPC) when
+  opening the BrowserWindow.
+- `socket.js` reads the mode: `"online"` → `io("https://photo-quiplash.up.railway.app")`;
+  `"local"` → `io()` (same-origin, proxied to localhost:5000 in dev).
+- `electron/main.js`: Online mode skips `startServer()` entirely; Local mode
+  spawns the PyInstaller binary as today.
+- `TV.jsx`: Online mode renders QR from `window.location.origin` immediately;
+  Local mode polls `/api/server-info` for the LAN IP as before.
