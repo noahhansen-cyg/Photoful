@@ -36,7 +36,7 @@ log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 app = Flask(__name__)
-app.config["SECRET_KEY"] = "dev-secret-change-in-prod"
+app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-secret-change-in-prod")
 
 CORS(app, resources={r"/api/*": {"origins": "*"}})
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode=ASYNC_MODE)
@@ -69,6 +69,10 @@ def _get_frontend_dist():
     """Return the path to the built React app, or None in dev mode."""
     if _FROZEN:
         return os.path.join(sys._MEIPASS, "frontend_dist")
+    # Cloud / packaged-without-PyInstaller: look for ../frontend/dist next to backend/
+    auto = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "frontend", "dist"))
+    if os.path.isdir(auto) and os.path.exists(os.path.join(auto, "index.html")):
+        return auto
     return None
 
 
@@ -391,14 +395,15 @@ if _FRONTEND_DIST:
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    log.info("Starting Photo Quiplash server on :5000")
+    port = int(os.environ.get("PORT", 5000))
+    log.info("Starting Photo Quiplash server on :%d", port)
     # In the packaged binary (threading mode) Werkzeug raises an error unless
     # allow_unsafe_werkzeug=True is passed and debug is off.  In dev, gevent
     # replaces the Werkzeug server entirely so debug=True is fine.
     socketio.run(
         app,
         host="0.0.0.0",
-        port=5000,
+        port=port,
         debug=not _FROZEN,
         use_reloader=False,
         allow_unsafe_werkzeug=_FROZEN,
