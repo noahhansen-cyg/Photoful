@@ -1,0 +1,14 @@
+# Packaged output
+dist/
+
+# Electron
+electron/node_modules/
+
+# PyInstaller
+backend/dist/
+backend/build/
+backend/__pycache__/
+*.spec.bak
+
+# macOS
+.DS_Store

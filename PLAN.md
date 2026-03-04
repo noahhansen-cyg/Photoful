@@ -265,9 +265,186 @@ Timeouts:
 - Sound effects
 - Mobile UI polish (large tap targets, no zoom on input focus)
 - Room cleanup after session ends
+- **Main menu** (see Sprint 5 — Distribution for detail)
 
-### Sprint 4 — Production (planned)
-- Deploy to Fly.io
-- Move image storage to Cloudflare R2 or AWS S3
-- Rate limiting on uploads
-- Optional NSFW content moderation
+### Sprint 4 — Production (absorbed into Sprint 5c/5d)
+- Deploy to Railway (replaces original Fly.io plan — simpler setup)
+- Image storage: ephemeral disk initially, Cloudflare R2 later if needed
+- Rate limiting on uploads (future)
+- Optional NSFW content moderation (future)
+
+### Sprint 5 — Distribution (in progress)
+- ✅ 5a — Executable Packaging (Electron + PyInstaller)
+- ✅ 5b — Main Menu + Settings page
+- **5c — Deploy cloud service** (next)
+- **5d — Local / Online mode toggle** (follows 5c)
+
+---
+
+## Sprint 5 — Distribution Detail
+
+The four items below all stem from the same goal: turn the current "run in a terminal"
+dev build into a packaged desktop app anyone can launch from Steam or a game launcher,
+with both a LAN mode (current behaviour) and an internet mode.
+
+---
+
+### 5a — Executable Packaging
+
+**Goal:** A double-clickable binary that boots the Flask server and opens the game UI
+in a window (or browser tab) without the user needing Python, Node, or a terminal.
+
+**Recommended approach — Electron wrapper:**
+
+```
+electron/
+  main.js          # Electron entry point
+  preload.js       # optional — bridge to renderer context
+```
+
+1. Build the Vite frontend to `frontend/dist/` (`npm run build`).
+2. Bundle the Flask backend + Python dependencies with **PyInstaller** into a single
+   binary (`backend/dist/server`). The Flask app then serves the built static files
+   from `frontend/dist/` instead of relying on Vite dev server.
+3. Electron `main.js`:
+   - Spawns the PyInstaller binary as a child process.
+   - Waits for the server to be ready (poll `http://localhost:5000/healthz`).
+   - Opens a `BrowserWindow` pointing at `http://localhost:5000`.
+   - On app quit, kills the server child process.
+4. Use **electron-builder** to produce a platform installer:
+   - Windows: `.exe` NSIS installer
+   - macOS: `.dmg` / `.app` bundle
+
+**Alternative — browser-only (no Electron):**
+If a native window is not required, PyInstaller alone can bundle the Flask server.
+At launch it opens `http://localhost:5000` in the user's default browser. Simpler,
+but no custom window chrome and the browser tab can be closed accidentally.
+
+**Steam compatibility:**
+Steam just needs a launchable executable. The Electron `.exe` or the PyInstaller
+binary can be set as the game's launch target in Steamworks. No special SDK
+integration is required unless you want Steam achievements or the overlay.
+
+**New files:**
+- `electron/main.js`
+- `electron/package.json`
+- `Makefile` targets: `make build-backend`, `make build-frontend`, `make build-electron`, `make package`
+
+---
+
+### 5b — Main Menu
+
+**Goal:** A home screen shown immediately on launch (instead of the raw "create/join"
+room form) that acts as the game's entry point.
+
+**Screens:**
+
+```
+┌─────────────────────────────────┐
+│       📸  Photo Quiplash        │
+│                                 │
+│   [ Play Online  ]              │
+│   [ Play Local   ]              │
+│                                 │
+│         Settings ⚙              │
+└─────────────────────────────────┘
+```
+
+- **Play Online** — navigates to the existing Home page with a connection preset
+  pointing at the cloud/relay server.
+- **Play Local** — navigates to the existing Home page with a connection preset
+  pointing at `localhost:5000` (the embedded server).
+- **Settings** — volume, display preferences (future).
+
+**Implementation:**
+- New route `/` → `MainMenu.jsx` component.
+- Existing Home.jsx becomes `/room` (create/join step).
+- The chosen mode is stored in React context (or a tiny Zustand/jotai store) and
+  read by `socket.js` to determine which server URL to connect to.
+- The Electron main process can pass the mode via a query param on launch
+  (`?mode=local` or `?mode=online`) to pre-select without user input.
+
+---
+
+### 5c — Deploy Cloud Service
+
+**Goal:** The Flask app runs permanently on a cloud server so players on any network
+can join without port forwarding, tunnelling, or a locally running server.
+
+**Platform: Railway**
+
+Railway is chosen over Fly.io (more config) and Render (free tier sleeps after
+15 min inactivity, which breaks a game lobby).
+
+```
+Cost: ~$5/month (Hobby plan, always-on)
+WebSockets: supported natively
+Disk: 1 GB persistent volume for /uploads (or ephemeral — fine for party game)
+Deploy: git push → auto-redeploy
+```
+
+**Architecture after 5c:**
+
+```
+Railway (always on)
+  Flask :$PORT  ─── serves React SPA + API + WebSocket
+      │
+      ├─ https://photo-quiplash.up.railway.app/          TV browser tab
+      ├─ https://photo-quiplash.up.railway.app/room/TV   TV screen
+      └─ https://photo-quiplash.up.railway.app/room/XXXX/phone   player phone
+
+Electron app (Online mode)
+  └─ BrowserWindow → https://photo-quiplash.up.railway.app
+     (no local Flask spawned)
+```
+
+**Files to add / change:**
+
+| File | Change |
+|---|---|
+| `backend/requirements.txt` | Add `gunicorn` |
+| `Procfile` | `web: gunicorn --worker-class geventwebsocket.gunicorn.workers.GeventWebSocketWorker --workers 1 --bind 0.0.0.0:$PORT backend.app:app` |
+| `railway.toml` | Build command: `cd frontend && npm ci && npm run build`; start: `gunicorn ...` |
+| `backend/app.py` | Read `PORT` from env (default 5000); remove `_FROZEN`/PyInstaller upload-dir logic (keep for local mode — conditional on `_FROZEN`) |
+| `electron/main.js` | Online mode: skip spawning local server, navigate BrowserWindow to cloud URL |
+| `frontend/src/socket.js` | Connect to cloud URL when in Online mode (via `VITE_SERVER_URL` env var or window.location) |
+| `frontend/src/pages/TV.jsx` | QR code uses `window.location.origin` (stable cloud URL — no polling needed) |
+
+**Photo uploads:**
+- Store to `UPLOADS_DIR` (same code as local). On Railway, this is ephemeral disk by
+  default — photos survive the game session but are wiped on redeploy. Fine for a party game.
+- To persist across deploys: mount a Railway volume at `/uploads`.
+- Cloud storage (R2/S3) is a future upgrade, not needed now.
+
+**QR code simplification:**
+In Online mode the server URL is static (`window.location.origin`), so `TV.jsx`
+no longer needs to poll `/api/server-info`. The QR code renders immediately with
+`${window.location.origin}/room/${code}/phone`.
+
+---
+
+### 5d — Local / Online Mode Toggle
+
+**Goal:** Players without internet (cabin, convention floor) can still play in LAN
+mode. Online is the default; Local is selectable from the main menu.
+
+**Behaviour difference:**
+
+| | Online mode | Local mode |
+|---|---|---|
+| Flask server | NOT started | Started on `localhost:5000` |
+| Room creation | On cloud server | On embedded server |
+| QR code | `window.location.origin/room/…` (immediate) | Local IP from `/api/server-info` |
+| Internet required | Yes | No (LAN only) |
+| Player join URL | `https://photo-quiplash.up.railway.app` | `http://192.168.x.x:5000` |
+
+**Implementation:**
+- `MainMenu.jsx` already has Play Online / Play Local buttons (Sprint 5b stub).
+- Electron passes `?mode=online` or `?mode=local` as a query param (or IPC) when
+  opening the BrowserWindow.
+- `socket.js` reads the mode: `"online"` → `io("https://photo-quiplash.up.railway.app")`;
+  `"local"` → `io()` (same-origin, proxied to localhost:5000 in dev).
+- `electron/main.js`: Online mode skips `startServer()` entirely; Local mode
+  spawns the PyInstaller binary as today.
+- `TV.jsx`: Online mode renders QR from `window.location.origin` immediately;
+  Local mode polls `/api/server-info` for the LAN IP as before.

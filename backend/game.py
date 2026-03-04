@@ -13,7 +13,7 @@ import os
 import rooms as room_store
 
 PROMPTS_PATH = os.path.join(os.path.dirname(__file__), "prompts.json")
-SUBMIT_TIMEOUT = 120  # seconds players have to submit photos for ALL their prompts
+SUBMIT_TIMEOUT = 120  # seconds players have to submit photos for ALL their promp1ts
 VOTE_TIMEOUT   = 30   # seconds players have to vote
 SCORES_TIMEOUT = 5    # seconds scores screen is shown before advancing
 

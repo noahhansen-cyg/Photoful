@@ -1,0 +1,43 @@
+{
+  "name": "photo-quiplash",
+  "version": "0.1.0",
+  "description": "A party photo game for TV + phones",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "package": "electron-builder"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0"
+  },
+  "build": {
+    "appId": "com.photoquiplash.app",
+    "productName": "Photo Quiplash",
+    "directories": {
+      "output": "../dist"
+    },
+    "files": [
+      "main.js"
+    ],
+    "extraResources": [
+      {
+        "from": "../backend/dist/quiplash-server",
+        "to": "server/quiplash-server"
+      },
+      {
+        "from": "../backend/dist/quiplash-server.exe",
+        "to": "server/quiplash-server.exe"
+      }
+    ],
+    "mac": {
+      "target": [
+        { "target": "dmg", "arch": ["x64", "arm64"] }
+      ],
+      "category": "public.app-category.games"
+    },
+    "win": {
+      "target": "nsis"
+    }
+  }
+}
