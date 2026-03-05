@@ -53,8 +53,14 @@ VOTING  (30s per prompt)
 SCORES  (5s)
   TV shows both competing photos with round winner highlighted and points earned.
   No leaderboard yet — that's reserved for the end.
-  → (more prompts remain) → VOTING (next prompt)
-  → (all prompts done) → FINAL
+  → (more prompts remain in current round) → VOTING (next prompt)
+  → (all prompts done, more rounds remain) → ROUND_INTRO
+  → (all prompts done, final round) → FINAL
+
+ROUND_INTRO  (7s)
+  Brief announcement screen: "Round 2 — Double Points!"
+  Votes are cleared; round counter increments; same photos replay at 2× points.
+  → (timer expires) → VOTING (first prompt, round 2)
 
 FINAL
   Overall leaderboard with winner crown. Game over.
@@ -70,7 +76,8 @@ All state is in-memory (Python dicts). No database.
 # Room
 {
     "room_code":           str,         # "ABCD"
-    "state":               str,         # lobby | submitting | voting | scores | final
+    "state":               str,         # lobby | submitting | voting | scores | round_intro | final
+    "round":               int,         # current voting round (1-indexed); doubles points each round
     "players":             list[Player],
     "prompts":             list[Prompt],
     "current_prompt_idx":  int,
@@ -129,7 +136,8 @@ All state is in-memory (Python dicts). No database.
 ```json
 {
   "room_code": "ABCD",
-  "state": "lobby|submitting|voting|scores|final",
+  "state": "lobby|submitting|voting|scores|round_intro|final",
+  "round": 1,
   "players": [{"id", "name", "role", "avatar_color", "score", "is_connected"}],
   "prompts": [...],
   "current_prompt": {
@@ -175,10 +183,10 @@ Photos are large — they go over HTTP, not WebSocket.
 
 ## Scoring
 
-- 1000 points per vote received
-- Computed in `tally_scores(prompt)` after voting closes
-- Applied to player scores in `apply_scores(room_code, prompt)`
-- `score_deltas` stored on the prompt for display on the scores screen
+- `round × 1000` points per vote received (round 1 = 1000 pts, round 2 = 2000 pts)
+- Computed in `tally_scores(prompt, points_per_vote)` after voting closes
+- Applied to player scores in `apply_scores(room_code, prompt)` (reads `room["round"]`)
+- `score_deltas` stored on the prompt for display on the scores screen; cleared between rounds
 
 ---
 
@@ -260,6 +268,16 @@ Timeouts:
 - Phone vote cards hidden for 3s to match TV reveal animation
 - Scores screen display reduced from 10s to 5s
 - Full test suite: 183 backend (pytest) + 110 frontend (vitest)
+
+### Sprint 6 — Two-Round Gameplay ✅
+- Second voting round after round 1 completes, with 2× points per vote (2000 pts)
+- `ROUND_INTRO` state (7s) announces "Round 2 — Double Points!" between rounds
+- Same photos replayed; votes cleared between rounds; `score_deltas` reset
+- TV shows round badge ("Round 2 — 2× Points") during voting in round 2
+- Phone shows "Round 2 — Double Points — get ready to vote!" during `round_intro`
+- `room["round"]` field added to data model and `game:state` payload
+- `tally_scores` and `apply_scores` updated to accept and apply round multiplier
+- Full test suite updated: existing two-round boundary tests fixed; 12+ new tests added
 
 ### Sprint 3 — Polish (planned)
 - Sound effects

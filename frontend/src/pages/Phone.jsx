@@ -136,11 +136,12 @@ export default function Phone() {
 
       {error && <p style={styles.error}>{error}</p>}
 
-      {state === "lobby"      && <LobbyScreen myRole={myRole} players={players} code={code} name={name} />}
-      {state === "submitting" && <SubmittingScreen code={code} allPrompts={allPrompts} myPlayerId={myPlayerId} timeLeft={timeLeft} />}
-      {state === "voting"     && <VotingScreen code={code} prompt={prompt} myPlayerId={myPlayerId} isAssigned={isAssigned} players={players} />}
-      {state === "scores"     && <ScoresScreen gameState={gameState} players={players} myPlayerId={myPlayerId} />}
-      {state === "final"      && <FinalScreen players={players} myPlayerId={myPlayerId} myRole={myRole} code={code} />}
+      {state === "lobby"       && <LobbyScreen myRole={myRole} players={players} code={code} name={name} />}
+      {state === "submitting"  && <SubmittingScreen code={code} allPrompts={allPrompts} myPlayerId={myPlayerId} timeLeft={timeLeft} />}
+      {state === "voting"      && <VotingScreen code={code} prompt={prompt} myPlayerId={myPlayerId} isAssigned={isAssigned} players={players} />}
+      {state === "scores"      && <ScoresScreen gameState={gameState} players={players} myPlayerId={myPlayerId} />}
+      {state === "round_intro" && <RoundIntroScreen round={gameState?.round ?? 2} />}
+      {state === "final"       && <FinalScreen players={players} myPlayerId={myPlayerId} myRole={myRole} code={code} />}
     </div>
   );
 }
@@ -446,6 +447,19 @@ function ScoresScreen({ gameState, players, myPlayerId }) {
       {myDelta === 0 && maxDelta > 0 && !winnerIds.includes(myPlayerId) && (
         <p style={styles.hint}>Better luck next round</p>
       )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Round Intro
+// ---------------------------------------------------------------------------
+
+function RoundIntroScreen({ round }) {
+  return (
+    <div style={styles.section}>
+      <p style={styles.label}>Round {round}</p>
+      <p style={styles.hint}>Double Points — get ready to submit new photos!</p>
     </div>
   );
 }

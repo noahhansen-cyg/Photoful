@@ -489,6 +489,7 @@ def test_advance_state_scores_to_next_voting():
 def test_advance_state_scores_to_final_on_last_prompt():
     code, _ = _room_in_submitting()
     rooms[code]["state"] = "scores"
+    rooms[code]["round"] = game.TOTAL_ROUNDS  # already on the last round
     last_idx = len(rooms[code]["prompts"]) - 1
     rooms[code]["current_prompt_idx"] = last_idx
     mock_io = _mock_socketio()
@@ -500,6 +501,7 @@ def test_advance_state_scores_to_final_on_last_prompt():
 def test_advance_state_final_clears_timer_end():
     code, _ = _room_in_submitting()
     rooms[code]["state"] = "scores"
+    rooms[code]["round"] = game.TOTAL_ROUNDS  # already on the last round
     last_idx = len(rooms[code]["prompts"]) - 1
     rooms[code]["current_prompt_idx"] = last_idx
     mock_io = _mock_socketio()
@@ -707,3 +709,123 @@ def test_scores_timeout_is_5_seconds():
     assert game.SCORES_TIMEOUT == 5, (
         f"SCORES_TIMEOUT is {game.SCORES_TIMEOUT}s — expected 5s"
     )
+
+
+# ---------------------------------------------------------------------------
+# Two-round gameplay
+# ---------------------------------------------------------------------------
+
+def test_tally_scores_uses_custom_points_per_vote():
+    prompt = {
+        "player_ids": ["p1", "p2"],
+        "votes": {"voter1": "p1", "voter2": "p1"},
+    }
+    result = game.tally_scores(prompt, points_per_vote=2000)
+    assert result["p1"] == 4000
+    assert result["p2"] == 0
+
+
+def test_apply_scores_uses_double_points_in_round_2():
+    code, player_ids = _room_in_submitting()
+    p1_id = player_ids[0]
+    rooms[code]["state"] = "voting"
+    rooms[code]["round"] = 2
+    rooms[code]["prompts"][0]["votes"] = {"voter": p1_id}
+    # Add a voter outside the matchup so the vote is valid
+    voter = {
+        "id": "voter", "name": "Voter", "role": "player",
+        "avatar_color": "#fff", "socket_id": "sv", "is_connected": True,
+    }
+    room_store.add_player(code, voter)
+
+    game.apply_scores(code, rooms[code]["prompts"][0])
+
+    p1 = next(p for p in rooms[code]["players"] if p["id"] == p1_id)
+    assert p1["score"] == game.POINTS_PER_VOTE * 2
+
+
+def test_advance_state_scores_to_round_intro_after_last_prompt_round_1():
+    code, _ = _room_in_submitting()
+    rooms[code]["state"] = "scores"
+    rooms[code]["round"] = 1
+    last_idx = len(rooms[code]["prompts"]) - 1
+    rooms[code]["current_prompt_idx"] = last_idx
+    mock_io = _mock_socketio()
+    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+        game.advance_state(code, mock_io)
+    assert rooms[code]["state"] == "round_intro"
+    assert rooms[code]["round"] == 2
+
+
+def test_round_intro_clears_votes_and_score_deltas():
+    code, player_ids = _room_in_submitting()
+    rooms[code]["state"] = "scores"
+    rooms[code]["round"] = 1
+    last_idx = len(rooms[code]["prompts"]) - 1
+    rooms[code]["current_prompt_idx"] = last_idx
+    # Pre-populate votes and score_deltas on all prompts
+    for p in rooms[code]["prompts"]:
+        p["votes"]        = {"voter": player_ids[0]}
+        p["score_deltas"] = {player_ids[0]: 1000, player_ids[1]: 0}
+    mock_io = _mock_socketio()
+    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+        game.advance_state(code, mock_io)
+    for p in rooms[code]["prompts"]:
+        assert p["votes"]        == {}
+        assert p["score_deltas"] == {}
+
+
+def test_advance_state_round_intro_to_submitting():
+    code, _ = _room_in_submitting()
+    rooms[code]["state"] = "round_intro"
+    rooms[code]["round"] = 2
+    rooms[code]["current_prompt_idx"] = len(rooms[code]["prompts"]) - 1
+    mock_io = _mock_socketio()
+    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+        game.advance_state(code, mock_io)
+    assert rooms[code]["state"] == "submitting"
+    assert rooms[code]["current_prompt_idx"] == 0
+
+
+def test_advance_state_round_intro_assigns_new_prompts():
+    code, _ = _room_in_submitting()
+    old_prompt_ids = {p["prompt_id"] for p in rooms[code]["prompts"]}
+    rooms[code]["state"] = "round_intro"
+    rooms[code]["round"] = 2
+    mock_io = _mock_socketio()
+    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+        game.advance_state(code, mock_io)
+    new_prompt_ids = {p["prompt_id"] for p in rooms[code]["prompts"]}
+    # Fresh prompts generated — none of the old IDs should remain
+    assert len(new_prompt_ids) > 0
+    assert new_prompt_ids.isdisjoint(old_prompt_ids)
+
+
+def test_advance_state_round_intro_sets_timer_end():
+    code, _ = _room_in_submitting()
+    rooms[code]["state"] = "round_intro"
+    rooms[code]["round"] = 2
+    mock_io = _mock_socketio()
+    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+        game.advance_state(code, mock_io)
+    assert rooms[code]["timer_end"] is not None
+
+
+def test_advance_state_scores_to_final_after_round_2_last_prompt():
+    code, _ = _room_in_submitting()
+    rooms[code]["state"] = "scores"
+    rooms[code]["round"] = game.TOTAL_ROUNDS
+    last_idx = len(rooms[code]["prompts"]) - 1
+    rooms[code]["current_prompt_idx"] = last_idx
+    mock_io = _mock_socketio()
+    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+        game.advance_state(code, mock_io)
+    assert rooms[code]["state"] == "final"
+
+
+def test_round_intro_timeout_constant_is_positive():
+    assert game.ROUND_INTRO_TIMEOUT > 0
+
+
+def test_total_rounds_constant_is_two():
+    assert game.TOTAL_ROUNDS == 2

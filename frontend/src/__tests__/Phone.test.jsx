@@ -985,3 +985,36 @@ describe("Phone vote lockout (3-second reveal delay)", () => {
     expect(screen.queryByRole("button", { name: /alice/i })).not.toBeInTheDocument();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Round Intro screen (phone)
+// ---------------------------------------------------------------------------
+
+describe("Phone round intro screen", () => {
+  async function joinAndEmitRoundIntro(round = 2) {
+    renderPhone();
+    await userEvent.type(screen.getByPlaceholderText(/your name/i), "Carol");
+    await userEvent.click(screen.getByRole("button", { name: /join game/i }));
+    act(() => {
+      emit("player:self", { player_id: "p-carol", role: "player" });
+      emit("game:state", {
+        state: "round_intro",
+        round,
+        players: [{ id: "p-carol", name: "Carol", role: "player", avatar_color: "#96CEB4" }],
+        prompts: [],
+        current_prompt: null,
+        timer_end: null,
+      });
+    });
+  }
+
+  it("shows 'Round 2' when state is round_intro", async () => {
+    await joinAndEmitRoundIntro(2);
+    expect(screen.getByText(/round 2/i)).toBeInTheDocument();
+  });
+
+  it("shows 'Double Points' hint during round intro", async () => {
+    await joinAndEmitRoundIntro(2);
+    expect(screen.getByText(/double points/i)).toBeInTheDocument();
+  });
+});

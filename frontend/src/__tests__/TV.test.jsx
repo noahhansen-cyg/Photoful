@@ -629,3 +629,96 @@ describe("TV voting screen — photo reveal animation", () => {
     expect(screen.getByText(/best photo/i)).toBeInTheDocument();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Round Intro screen
+// ---------------------------------------------------------------------------
+
+describe("Round Intro screen", () => {
+  function emitRoundIntro(round = 2) {
+    emit("game:state", {
+      state: "round_intro",
+      round,
+      timer_end: Date.now() / 1000 + 7,
+      players: [],
+      prompts: [],
+      current_prompt: null,
+    });
+  }
+
+  it("renders when state is round_intro", () => {
+    renderTV();
+    act(() => emitRoundIntro());
+    expect(screen.getByText(/round 2/i)).toBeInTheDocument();
+  });
+
+  it("shows 'Double Points' heading", () => {
+    renderTV();
+    act(() => emitRoundIntro());
+    expect(screen.getByText(/double points/i)).toBeInTheDocument();
+  });
+
+  it("shows the hint about points value", () => {
+    renderTV();
+    act(() => emitRoundIntro());
+    expect(screen.getByText(/2,000 pts/i)).toBeInTheDocument();
+  });
+
+  it("shows a timer", () => {
+    renderTV();
+    act(() => emitRoundIntro());
+    // TimerBar renders a countdown text (e.g. "7s")
+    expect(screen.getByText(/\ds$/)).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Round badge in voting screen
+// ---------------------------------------------------------------------------
+
+describe("Round badge in voting screen", () => {
+  function emitVotingRound2() {
+    emit("game:state", {
+      state: "voting",
+      round: 2,
+      prompt_number: 1,
+      total_prompts: 3,
+      current_prompt: {
+        prompt_id:   "pid-r2",
+        player_ids:  ["1", "2"],
+        submissions: {},
+        votes:       {},
+        prompt_text: "Best round 2 photo?",
+      },
+      players: [
+        { id: "1", name: "Alice", role: "player", avatar_color: "#FF6B6B" },
+        { id: "2", name: "Bob",   role: "player", avatar_color: "#4ECDC4" },
+      ],
+    });
+  }
+
+  it("shows round badge in round 2", () => {
+    renderTV();
+    act(() => emitVotingRound2());
+    expect(screen.getByText(/round 2.*2×/i)).toBeInTheDocument();
+  });
+
+  it("does not show round badge in round 1", () => {
+    renderTV();
+    act(() => emit("game:state", {
+      state: "voting",
+      round: 1,
+      prompt_number: 1,
+      total_prompts: 3,
+      current_prompt: {
+        prompt_id: "pid-r1", player_ids: ["1", "2"],
+        submissions: {}, votes: {}, prompt_text: "Round 1 photo?",
+      },
+      players: [
+        { id: "1", name: "Alice", role: "player", avatar_color: "#FF6B6B" },
+        { id: "2", name: "Bob",   role: "player", avatar_color: "#4ECDC4" },
+      ],
+    }));
+    expect(screen.queryByText(/2×/i)).not.toBeInTheDocument();
+  });
+});

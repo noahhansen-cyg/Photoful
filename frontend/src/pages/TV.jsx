@@ -50,11 +50,12 @@ export default function TV() {
     <div style={styles.page}>
       <Header code={code} connected={connected} />
       <div style={styles.body}>
-        {state === "lobby"      && <LobbyScreen players={players} code={code} />}
-        {state === "submitting" && <SubmittingScreen gameState={gameState} players={players} timeLeft={timeLeft} />}
-        {state === "voting"     && <VotingScreen gameState={gameState} players={players} timeLeft={timeLeft} />}
-        {state === "scores"     && <ScoresScreen gameState={gameState} players={players} timeLeft={timeLeft} />}
-        {state === "final"      && <FinalScreen players={players} />}
+        {state === "lobby"       && <LobbyScreen players={players} code={code} />}
+        {state === "submitting"  && <SubmittingScreen gameState={gameState} players={players} timeLeft={timeLeft} />}
+        {state === "voting"      && <VotingScreen gameState={gameState} players={players} timeLeft={timeLeft} />}
+        {state === "scores"      && <ScoresScreen gameState={gameState} players={players} timeLeft={timeLeft} />}
+        {state === "round_intro" && <RoundIntroScreen gameState={gameState} timeLeft={timeLeft} />}
+        {state === "final"       && <FinalScreen players={players} />}
       </div>
     </div>
   );
@@ -193,6 +194,9 @@ function VotingScreen({ gameState, players, timeLeft }) {
       <div style={styles.promptBadge}>
         Prompt {gameState.prompt_number} of {gameState.total_prompts}
       </div>
+      {(gameState?.round ?? 1) > 1 && (
+        <div style={styles.roundBadge}>Round {gameState.round} — 2× Points</div>
+      )}
       <h2 style={styles.promptText}>{prompt?.prompt_text}</h2>
       <TimerBar timeLeft={timeLeft} total={30} />
       <div data-testid="voting-photos" style={{ ...styles.photoRow, opacity: photosVisible ? 1 : 0, transition: photosVisible ? "opacity 3s ease-in" : "none" }}>
@@ -268,6 +272,22 @@ function ScoresScreen({ gameState, players, timeLeft }) {
           );
         })}
       </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Round Intro
+// ---------------------------------------------------------------------------
+
+function RoundIntroScreen({ gameState, timeLeft }) {
+  const round = gameState?.round ?? 2;
+  return (
+    <div style={styles.centered}>
+      <div style={styles.roundIntroBadge}>Round {round}</div>
+      <h2 style={styles.bigLabel}>Double Points!</h2>
+      <p style={styles.hint}>Every vote is now worth 2,000 pts</p>
+      <TimerBar timeLeft={timeLeft} total={7} />
     </div>
   );
 }
@@ -390,6 +410,9 @@ const styles = {
   qrSection:     { display: "flex", flexDirection: "column", alignItems: "center", gap: "0.75rem", background: "#1a1a2e", borderRadius: 16, padding: "1.5rem", border: "2px solid #2d2d44" },
   qrHint:        { color: "#aaa", fontSize: "0.95rem", margin: 0 },
   playerSection: { display: "flex", flexDirection: "column", alignItems: "center", gap: "1.5rem" },
+
+  roundIntroBadge: { fontSize: "3rem", fontWeight: "bold", color: "#6c63ff" },
+  roundBadge: { background: "#6c63ff22", border: "1px solid #6c63ff", borderRadius: 999, padding: "0.3rem 0.9rem", fontSize: "0.85rem", color: "#6c63ff" },
 
   crownEmoji:  { fontSize: "5rem" },
   winnerName:  { fontSize: "2rem", color: "#6c63ff", fontWeight: "bold", margin: 0 },
