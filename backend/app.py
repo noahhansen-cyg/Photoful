@@ -36,7 +36,7 @@ log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 app = Flask(__name__)
-app.config["SECRET_KEY"] = "dev-secret-change-in-prod"
+app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-secret-change-in-prod")
 
 CORS(app, resources={r"/api/*": {"origins": "*"}})
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode=ASYNC_MODE)

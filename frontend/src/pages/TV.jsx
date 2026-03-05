@@ -85,7 +85,12 @@ function Header({ code, connected }) {
 
 function LobbyScreen({ players, code }) {
   const [localIp, setLocalIp] = useState(null);
+  // On localhost the QR code must show the LAN IP so phones on the same WiFi
+  // can connect.  On a public host (cloud / Railway) window.location is already
+  // the right address — skip the polling to avoid leaking an internal IP.
+  const isLocal = window.location.hostname === "localhost";
   useEffect(() => {
+    if (!isLocal) return;
     fetch("/api/server-info")
       .then(r => r.json())
       .then(data => setLocalIp(data.local_ip))
@@ -93,7 +98,7 @@ function LobbyScreen({ players, code }) {
   }, []);
 
   const port    = window.location.port ? `:${window.location.port}` : "";
-  const host    = localIp ? `${localIp}${port}` : window.location.host;
+  const host    = isLocal && localIp ? `${localIp}${port}` : window.location.host;
   const joinUrl = `${window.location.protocol}//${host}/room/${code}/phone`;
   return (
     <div style={styles.centered}>
