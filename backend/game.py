@@ -17,8 +17,10 @@ SUBMIT_TIMEOUT = 120  # seconds players have to submit photos for ALL their prom
 VOTE_TIMEOUT   = 30   # seconds players have to vote
 SCORES_TIMEOUT = 5    # seconds scores screen is shown before advancing
 
-POINTS_PER_VOTE = 1000
-PROMPTS_PER_PLAYER = 3
+POINTS_PER_VOTE     = 1000
+PROMPTS_PER_PLAYER  = 2
+ROUND_INTRO_TIMEOUT = 7   # seconds the "Round N!" screen is shown before voting resumes
+TOTAL_ROUNDS        = 2   # total number of voting rounds
 
 
 def load_prompts():
@@ -110,21 +112,22 @@ def all_voted(prompt, connected_players):
     return all(p["id"] in prompt["votes"] for p in eligible)
 
 
-def tally_scores(prompt):
+def tally_scores(prompt, points_per_vote=POINTS_PER_VOTE):
     """Return {player_id: points_earned} for this prompt."""
     vote_counts = {}
     for pid in prompt["player_ids"]:
         vote_counts[pid] = 0
     for voted_for in prompt["votes"].values():
         if voted_for in vote_counts:
-            vote_counts[voted_for] += POINTS_PER_VOTE
+            vote_counts[voted_for] += points_per_vote
     return vote_counts
 
 
 def apply_scores(room_code, prompt):
     """Add vote-based points to player scores in the room."""
-    deltas = tally_scores(prompt)
     room = room_store.get_room(room_code)
+    pts  = POINTS_PER_VOTE * room.get("round", 1) if room else POINTS_PER_VOTE
+    deltas = tally_scores(prompt, pts)
     if not room:
         return deltas
     for player in room["players"]:
@@ -175,9 +178,32 @@ def advance_state(room_code, socketio):
             room["timer_greenlet"] = _start_timer(
                 room_code, VOTE_TIMEOUT, lambda: advance_state(room_code, socketio), socketio
             )
+        elif room.get("round", 1) < TOTAL_ROUNDS:
+            # End of a round — more rounds remain; clear votes, bump round, show intro.
+            room["round"] = room.get("round", 1) + 1
+            for p in room["prompts"]:
+                p["votes"]        = {}
+                p["score_deltas"] = {}
+            room["state"]    = "round_intro"
+            room["timer_end"] = time.time() + ROUND_INTRO_TIMEOUT
+            room["timer_greenlet"] = _start_timer(
+                room_code, ROUND_INTRO_TIMEOUT, lambda: advance_state(room_code, socketio), socketio
+            )
         else:
             room["state"]    = "final"
             room["timer_end"] = None
+
+    elif state == "round_intro":
+        # Intro timer fired — assign fresh prompts and start a new submission phase.
+        players = [p for p in room["players"]
+                   if p["is_connected"] and p["role"] in ("player", "host")]
+        room["prompts"]            = assign_prompts(players)
+        room["current_prompt_idx"] = 0
+        room["state"]    = "submitting"
+        room["timer_end"] = time.time() + SUBMIT_TIMEOUT
+        room["timer_greenlet"] = _start_timer(
+            room_code, SUBMIT_TIMEOUT, lambda: advance_state(room_code, socketio), socketio
+        )
 
     socketio.emit("game:state", room_store.get_room_state(room_code), to=room_code)
 

@@ -20,6 +20,7 @@ def create_room():
         "host_id":            None,
         "players":            [],
         # Game round data
+        "round":              1,    # current voting round (1-indexed)
         "prompts":            [],   # list of PromptAssignment dicts
         "current_prompt_idx": 0,
         "timer_end":          None, # unix timestamp (float) when current timer expires
@@ -125,6 +126,7 @@ def get_room_state(code):
     return {
         "room_code":      code,
         "state":          room["state"],
+        "round":          room.get("round", 1),
         "players":        connected_players,
         "prompts":        room["prompts"],    # all prompts (used during submitting phase)
         "current_prompt": prompt,             # the active prompt for voting/scores
@@ -143,6 +145,7 @@ def reset_room(code):
     if not room:
         return False
     room["state"]               = "lobby"
+    room["round"]               = 1
     room["prompts"]             = []
     room["current_prompt_idx"]  = 0
     room["timer_end"]           = None

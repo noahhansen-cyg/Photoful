@@ -218,12 +218,9 @@ def test_async_mode_is_gevent_in_dev():
     assert app_module.ASYNC_MODE == "gevent"
 
 
-def test_frontend_dist_is_none_or_valid_dir():
-    """_FRONTEND_DIST is None when no built frontend exists, or a real directory path."""
-    v = app_module._FRONTEND_DIST
-    if v is not None:
-        assert os.path.isdir(v), f"_FRONTEND_DIST={v!r} is not a directory"
-        assert os.path.exists(os.path.join(v, "index.html")), "expected index.html in _FRONTEND_DIST"
+def test_frontend_dist_is_none_in_dev():
+    """_FRONTEND_DIST must be None outside a frozen bundle (SPA route not registered)."""
+    assert app_module._FRONTEND_DIST is None
 
 
 def test_upload_dir_exists():

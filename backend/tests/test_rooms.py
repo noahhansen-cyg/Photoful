@@ -509,3 +509,26 @@ def test_reset_room_preserves_host_id():
     code = _room_with_final_state()
     room_store.reset_room(code)
     assert rooms[code]["host_id"] == "p1"
+
+
+# ---------------------------------------------------------------------------
+# Round field
+# ---------------------------------------------------------------------------
+
+def test_create_room_initial_round_is_1():
+    room = room_store.create_room()
+    assert room["round"] == 1
+
+
+def test_get_room_state_includes_round():
+    room = room_store.create_room()
+    state = room_store.get_room_state(room["code"])
+    assert "round" in state
+    assert state["round"] == 1
+
+
+def test_reset_room_resets_round_to_1():
+    code = _room_with_final_state()
+    rooms[code]["round"] = 2
+    room_store.reset_room(code)
+    assert rooms[code]["round"] == 1
