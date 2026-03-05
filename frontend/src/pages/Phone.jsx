@@ -140,8 +140,12 @@ export default function Phone() {
       {state === "submitting"  && <SubmittingScreen code={code} allPrompts={allPrompts} myPlayerId={myPlayerId} timeLeft={timeLeft} />}
       {state === "voting"      && <VotingScreen code={code} prompt={prompt} myPlayerId={myPlayerId} isAssigned={isAssigned} players={players} />}
       {state === "scores"      && <ScoresScreen gameState={gameState} players={players} myPlayerId={myPlayerId} />}
-      {state === "round_intro" && <RoundIntroScreen round={gameState?.round ?? 2} />}
-      {state === "final"       && <FinalScreen players={players} myPlayerId={myPlayerId} myRole={myRole} code={code} />}
+      {state === "round_intro"    && <RoundIntroScreen round={gameState?.round ?? 2} />}
+      {state === "caption_intro"  && <CaptionIntroScreen />}
+      {state === "captioning"     && <CaptionSubmitScreen gameState={gameState} myPlayerId={myPlayerId} code={code} />}
+      {state === "caption_voting" && <CaptionVoteScreen gameState={gameState} myPlayerId={myPlayerId} code={code} players={players} />}
+      {state === "caption_scores" && <div style={styles.section}><p style={styles.hint}>Caption scores — get ready for the final!</p></div>}
+      {state === "final"          && <FinalScreen players={players} myPlayerId={myPlayerId} myRole={myRole} code={code} />}
     </div>
   );
 }
@@ -460,6 +464,149 @@ function RoundIntroScreen({ round }) {
     <div style={styles.section}>
       <p style={styles.label}>Round {round}</p>
       <p style={styles.hint}>Double Points — get ready to submit new photos!</p>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Caption Intro
+// ---------------------------------------------------------------------------
+
+function CaptionIntroScreen() {
+  return (
+    <div style={styles.section}>
+      <div style={{ fontSize: "3rem" }}>📸</div>
+      <p style={styles.label}>Final Round!</p>
+      <p style={styles.hint}>Write the funniest caption for the winning photo</p>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Caption Submit
+// ---------------------------------------------------------------------------
+
+function CaptionSubmitScreen({ gameState, myPlayerId, code }) {
+  const cp = gameState?.caption_prompt;
+  const [caption, setCaption] = useState("");
+  const [submitted, setSubmitted] = useState(false);
+
+  const alreadySubmitted = cp?.submissions?.[myPlayerId];
+
+  function handleSubmit() {
+    const text = caption.trim();
+    if (!text) return;
+    socket.emit("submit:caption", { room_code: code, caption_text: text });
+    setSubmitted(true);
+  }
+
+  if (submitted || alreadySubmitted) {
+    return (
+      <div style={styles.section}>
+        <div style={styles.bigCheck}>✓</div>
+        <p style={styles.label}>Caption submitted!</p>
+        <p style={styles.hint}>Waiting for others...</p>
+      </div>
+    );
+  }
+
+  return (
+    <div style={styles.section}>
+      <p style={styles.label}>Write your caption</p>
+      <p style={styles.hint}>The funniest caption wins votes!</p>
+      <textarea
+        data-testid="caption-input"
+        style={{ ...styles.captionInput, height: "100px", resize: "vertical" }}
+        placeholder="Type your caption..."
+        value={caption}
+        onChange={e => setCaption(e.target.value)}
+        maxLength={120}
+      />
+      <button
+        style={styles.submitBtn(!!caption.trim())}
+        onClick={handleSubmit}
+        disabled={!caption.trim()}
+      >
+        Submit Caption
+      </button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Caption Vote
+// ---------------------------------------------------------------------------
+
+function CaptionVoteScreen({ gameState, myPlayerId, code, players }) {
+  const cp = gameState?.caption_prompt;
+  const [voted, setVoted] = useState(false);
+  const alreadyVoted = cp?.votes?.[myPlayerId];
+
+  const [captionsReady, setCaptionsReady] = useState(false);
+  const cpId = cp?.prompt_id;
+  useEffect(() => {
+    setCaptionsReady(false);
+    const t = setTimeout(() => setCaptionsReady(true), 3000);
+    return () => clearTimeout(t);
+  }, [cpId]);
+
+  const didNotSubmit = cp && !cp.submissions?.[myPlayerId];
+
+  if (voted || alreadyVoted) {
+    return (
+      <div style={styles.section}>
+        <div style={styles.bigCheck}>✓</div>
+        <p style={styles.label}>Vote cast!</p>
+        <p style={styles.hint}>Waiting for others...</p>
+      </div>
+    );
+  }
+
+  if (didNotSubmit) {
+    return (
+      <div style={styles.section}>
+        <p style={styles.label}>You didn't submit in time</p>
+        <p style={styles.hint}>Watch the results on the big screen!</p>
+      </div>
+    );
+  }
+
+  if (!captionsReady) {
+    return (
+      <div style={styles.section}>
+        <p style={styles.label}>Captions are being revealed...</p>
+        <p style={styles.hint}>Voting opens in a moment</p>
+      </div>
+    );
+  }
+
+  const submissions = cp?.submissions ?? {};
+  const playerIds   = cp?.player_ids ?? [];
+  const getPlayer   = (id) => players.find(p => p.id === id);
+
+  const others = playerIds.filter(pid => pid !== myPlayerId);
+
+  function castVote(votedForId) {
+    socket.emit("submit:caption_vote", { room_code: code, voted_for_id: votedForId });
+    setVoted(true);
+  }
+
+  return (
+    <div style={styles.section}>
+      <p style={styles.label}>Vote for your favourite!</p>
+      <div style={styles.voteOptions}>
+        {others.map(pid => {
+          const sub    = submissions[pid];
+          const player = getPlayer(pid);
+          if (!sub) return null;
+          return (
+            <button key={pid} style={styles.voteCard} onClick={() => castVote(pid)}>
+              <div style={{ ...styles.voteName(player?.avatar_color), fontSize: "1rem" }}>{player?.name}</div>
+              <div style={{ fontSize: "1.1rem", fontStyle: "italic", textAlign: "center" }}>"{sub.caption}"</div>
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }

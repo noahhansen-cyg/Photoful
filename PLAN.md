@@ -55,12 +55,33 @@ SCORES  (5s)
   No leaderboard yet — that's reserved for the end.
   → (more prompts remain in current round) → VOTING (next prompt)
   → (all prompts done, more rounds remain) → ROUND_INTRO
-  → (all prompts done, final round) → FINAL
+  → (all prompts done, round 2 complete) → CAPTION_INTRO
 
 ROUND_INTRO  (7s)
   Brief announcement screen: "Round 2 — Double Points!"
   Votes are cleared; round counter increments; same photos replay at 2× points.
   → (timer expires) → VOTING (first prompt, round 2)
+
+CAPTION_INTRO  (7s)
+  Final round announcement: "Caption Challenge!"
+  The highest-voted photo from round 2 is revealed on screen.
+  → (timer expires) → CAPTIONING
+
+CAPTIONING  (60s)
+  All players type a funny text caption for the featured photo (no photo upload).
+  TV shows the featured photo and submission progress count.
+  → (all players submitted, OR timer expires) → CAPTION_VOTING
+
+CAPTION_VOTING  (30s)
+  TV shows the featured photo and all submitted captions as cards.
+  All players vote for their favourite caption (can't vote for their own).
+  3-second reveal delay before captions are shown (same pattern as photo voting).
+  → (all eligible players voted, OR timer expires) → CAPTION_SCORES
+
+CAPTION_SCORES  (5s)
+  TV shows caption cards with vote counts and score deltas.
+  Winner badge on the caption that earned the most votes.
+  → FINAL
 
 FINAL
   Overall leaderboard with winner crown. Game over.
@@ -76,7 +97,9 @@ All state is in-memory (Python dicts). No database.
 # Room
 {
     "room_code":           str,         # "ABCD"
-    "state":               str,         # lobby | submitting | voting | scores | round_intro | final
+    "state":               str,         # lobby | submitting | voting | scores | round_intro
+                                        # | caption_intro | captioning | caption_voting
+                                        # | caption_scores | final
     "round":               int,         # current voting round (1-indexed); doubles points each round
     "players":             list[Player],
     "prompts":             list[Prompt],
@@ -84,6 +107,20 @@ All state is in-memory (Python dicts). No database.
     "timer_end":           float | None, # unix timestamp
     "timer_greenlet":      Greenlet | None,
     "host_id":             str | None,
+    "caption_prompt":      CaptionPrompt | None,  # set when caption round starts
+}
+
+# CaptionPrompt
+{
+    "prompt_id":            str,   # uuid
+    "round_type":           str,   # "caption"
+    "featured_image_url":   str,   # URL of the winning photo from round 2
+    "featured_player_id":   str,   # who originally submitted the winning photo
+    "featured_prompt_text": str,   # original prompt text for context
+    "player_ids":           list[str],  # all players participate
+    "submissions":          {player_id: {"caption": str}},  # text captions
+    "votes":                {voter_id: voted_for_player_id},
+    "score_deltas":         {player_id: int},  # set after tallying
 }
 
 # Player
@@ -119,7 +156,10 @@ All state is in-memory (Python dicts). No database.
 | `host:claim` | `{room_code}` | In-lobby player claims the host role |
 | `host:start` | `{room_code}` | Host starts the game (requires ≥2 players) |
 | `submit:photo` | `{room_code, prompt_id, image_url, caption?}` | Player submits a photo |
-| `submit:vote` | `{room_code, prompt_id, voted_for_id}` | Player casts a vote |
+| `submit:vote` | `{room_code, prompt_id, voted_for_id}` | Player casts a vote in a photo round |
+| `submit:caption` | `{room_code, caption_text}` | Player submits a text caption (final round) |
+| `submit:caption_vote` | `{room_code, voted_for_id}` | Player votes for a caption (final round) |
+| `host:restart` | `{room_code}` | Host restarts the game from lobby (final state only) |
 
 ### Server → All Clients in Room
 | Event | Payload | Description |
@@ -136,7 +176,7 @@ All state is in-memory (Python dicts). No database.
 ```json
 {
   "room_code": "ABCD",
-  "state": "lobby|submitting|voting|scores|round_intro|final",
+  "state": "lobby|submitting|voting|scores|round_intro|caption_intro|captioning|caption_voting|caption_scores|final",
   "round": 1,
   "players": [{"id", "name", "role", "avatar_color", "score", "is_connected"}],
   "prompts": [...],
@@ -150,7 +190,18 @@ All state is in-memory (Python dicts). No database.
   },
   "prompt_number": 1,
   "total_prompts": 3,
-  "timer_end": 1234567890.0
+  "timer_end": 1234567890.0,
+  "caption_prompt": {
+    "prompt_id": "...",
+    "round_type": "caption",
+    "featured_image_url": "/uploads/ABCD/abc123.jpg",
+    "featured_player_id": "...",
+    "featured_prompt_text": "Show us your best...",
+    "player_ids": ["id1", "id2", "id3"],
+    "submissions": {"id1": {"caption": "A funny caption"}},
+    "votes": {"id2": "id1"},
+    "score_deltas": {"id1": 2000}
+  }
 }
 ```
 
@@ -209,6 +260,9 @@ Timeouts:
 - Submit: 120s
 - Vote: 30s
 - Scores display: 5s
+- Caption intro: 7s
+- Captioning: 60s
+- Caption scores: 5s
 
 ---
 
@@ -278,6 +332,19 @@ Timeouts:
 - `room["round"]` field added to data model and `game:state` payload
 - `tally_scores` and `apply_scores` updated to accept and apply round multiplier
 - Full test suite updated: existing two-round boundary tests fixed; 12+ new tests added
+
+### Sprint 7 — Caption Round (Final Round) ✅
+- After round 2 completes, the highest-voted photo is selected (`find_best_photo`) and a caption round begins
+- New states: `CAPTION_INTRO (7s) → CAPTIONING (60s) → CAPTION_VOTING (30s) → CAPTION_SCORES (5s) → FINAL`
+- `room["caption_prompt"]` field stores all caption round data (featured photo, player_ids, text submissions, votes, score_deltas)
+- All players (including host) submit a text caption via `submit:caption {room_code, caption_text}`
+- All players vote for a favourite caption (excluding their own) via `submit:caption_vote {room_code, voted_for_id}`
+- Points remain 2000 pts/vote (doubled from round 1); reuses existing `tally_scores`
+- TV: `CaptionIntroScreen` (featured photo + announcement), `CaptioningScreen` (photo + progress count), `CaptionVotingScreen` (photo + caption cards with 3s reveal delay + vote counts), `CaptionScoresScreen` (photo + winner badge + score deltas)
+- Phone: `CaptionIntroScreen` (announcement), `CaptionSubmitScreen` (textarea + submit), `CaptionVoteScreen` (caption buttons excluding own, 3s reveal delay), `caption_scores` waiting screen
+- Bots auto-submit captions and auto-vote in the caption round
+- Fallback: if no photo submissions exist after round 2, game goes directly to `final`
+- Full test suite: 243 backend tests (41 new) + 173 frontend tests (15 new)
 
 ### Sprint 3 — Polish (planned)
 - Sound effects

@@ -1018,3 +1018,111 @@ describe("Phone round intro screen", () => {
     expect(screen.getByText(/double points/i)).toBeInTheDocument();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Caption round screens (phone)
+// ---------------------------------------------------------------------------
+
+describe("Phone caption round screens", () => {
+  const players = [
+    { id: "p1", name: "Alice", role: "player", avatar_color: "#FF6B6B" },
+    { id: "p2", name: "Bob",   role: "player", avatar_color: "#4ECDC4" },
+  ];
+  const captionPrompt = {
+    prompt_id:            "cp-1",
+    round_type:           "caption",
+    featured_image_url:   "/uploads/ABCD/featured.jpg",
+    featured_player_id:   "p1",
+    featured_prompt_text: "Funniest pet photo",
+    player_ids:           ["p1", "p2"],
+    submissions:          {},
+    votes:                {},
+    score_deltas:         {},
+  };
+
+  async function joinPhone(pid = "p1") {
+    renderPhone();
+    await userEvent.type(screen.getByPlaceholderText(/your name/i), "Alice");
+    await userEvent.click(screen.getByRole("button", { name: /join game/i }));
+    act(() => {
+      emit("player:self", { player_id: pid, role: "player" });
+    });
+  }
+
+  it("caption_intro shows 'Final Round' text", async () => {
+    await joinPhone();
+    act(() => emit("game:state", {
+      state: "caption_intro", round: 2,
+      caption_prompt: captionPrompt,
+      players, prompts: [], current_prompt: null, timer_end: null,
+    }));
+    expect(screen.getByText(/final round/i)).toBeInTheDocument();
+  });
+
+  it("captioning shows textarea and submit button", async () => {
+    await joinPhone();
+    act(() => emit("game:state", {
+      state: "captioning", round: 2,
+      caption_prompt: captionPrompt,
+      players, prompts: [], current_prompt: null, timer_end: null,
+    }));
+    expect(screen.getByTestId("caption-input")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /submit caption/i })).toBeInTheDocument();
+  });
+
+  it("captioning shows waiting message after submission", async () => {
+    await joinPhone();
+    act(() => emit("game:state", {
+      state: "captioning", round: 2,
+      caption_prompt: captionPrompt,
+      players, prompts: [], current_prompt: null, timer_end: null,
+    }));
+    await userEvent.type(screen.getByTestId("caption-input"), "Funny caption");
+    await userEvent.click(screen.getByRole("button", { name: /submit caption/i }));
+    expect(screen.getByText(/waiting for others/i)).toBeInTheDocument();
+  });
+
+  it("caption_voting shows vote cards for other players after delay", async () => {
+    await joinPhone("p1");
+    const promptWithSubs = {
+      ...captionPrompt,
+      submissions: {
+        "p1": { caption: "Alice caption" },
+        "p2": { caption: "Bob caption" },
+      },
+    };
+    vi.useFakeTimers();
+    act(() => emit("game:state", {
+      state: "caption_voting", round: 2,
+      caption_prompt: promptWithSubs,
+      players, prompts: [], current_prompt: null, timer_end: null,
+    }));
+    act(() => { vi.advanceTimersByTime(3500); });
+    vi.useRealTimers();
+    // Bob's caption should appear (not Alice's own)
+    expect(screen.getByText(/Bob caption/)).toBeInTheDocument();
+    // Alice's own caption should not appear as a vote button
+    expect(screen.queryByText(/Alice caption/)).not.toBeInTheDocument();
+  });
+
+  it("caption_voting shows waiting after voting", async () => {
+    await joinPhone("p1");
+    const promptWithSubs = {
+      ...captionPrompt,
+      submissions: {
+        "p1": { caption: "Alice caption" },
+        "p2": { caption: "Bob caption" },
+      },
+    };
+    vi.useFakeTimers();
+    act(() => emit("game:state", {
+      state: "caption_voting", round: 2,
+      caption_prompt: promptWithSubs,
+      players, prompts: [], current_prompt: null, timer_end: null,
+    }));
+    act(() => { vi.advanceTimersByTime(3500); });
+    vi.useRealTimers();
+    await userEvent.click(screen.getByText(/Bob caption/));
+    expect(screen.getByText(/waiting for others/i)).toBeInTheDocument();
+  });
+});

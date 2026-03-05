@@ -532,3 +532,128 @@ def test_reset_room_resets_round_to_1():
     rooms[code]["round"] = 2
     room_store.reset_room(code)
     assert rooms[code]["round"] == 1
+
+
+# ---------------------------------------------------------------------------
+# caption_prompt field
+# ---------------------------------------------------------------------------
+
+def test_create_room_caption_prompt_is_none():
+    room = room_store.create_room()
+    assert room["caption_prompt"] is None
+
+
+def test_get_room_state_includes_caption_prompt():
+    room = room_store.create_room()
+    state = room_store.get_room_state(room["code"])
+    assert "caption_prompt" in state
+    assert state["caption_prompt"] is None
+
+
+def test_reset_room_clears_caption_prompt():
+    code = _room_with_final_state()
+    rooms[code]["caption_prompt"] = {"prompt_id": "cp-1"}
+    room_store.reset_room(code)
+    assert rooms[code]["caption_prompt"] is None
+
+
+# ---------------------------------------------------------------------------
+# add_caption
+# ---------------------------------------------------------------------------
+
+def _room_in_captioning():
+    """Return a room in 'captioning' state with a caption_prompt for p1 and p2."""
+    room = room_store.create_room()
+    code = room["code"]
+    room_store.add_player(code, _make_player(id="p1", socket_id="s1", name="Alice"))
+    room_store.add_player(code, _make_player(id="p2", socket_id="s2", name="Bob"))
+    rooms[code]["state"] = "captioning"
+    rooms[code]["caption_prompt"] = {
+        "prompt_id":            "cp-1",
+        "round_type":           "caption",
+        "featured_image_url":   "/img.jpg",
+        "featured_player_id":   "p1",
+        "featured_prompt_text": "A prompt",
+        "player_ids":           ["p1", "p2"],
+        "submissions":          {},
+        "votes":                {},
+        "score_deltas":         {},
+    }
+    return code
+
+
+def test_add_caption_returns_true_on_success():
+    code = _room_in_captioning()
+    assert room_store.add_caption(code, "p1", "My funny caption") is True
+
+
+def test_add_caption_records_text():
+    code = _room_in_captioning()
+    room_store.add_caption(code, "p1", "My funny caption")
+    assert rooms[code]["caption_prompt"]["submissions"]["p1"]["caption"] == "My funny caption"
+
+
+def test_add_caption_fails_wrong_state():
+    code = _room_in_captioning()
+    rooms[code]["state"] = "caption_voting"
+    assert room_store.add_caption(code, "p1", "text") is False
+
+
+def test_add_caption_fails_invalid_player():
+    code = _room_in_captioning()
+    assert room_store.add_caption(code, "p99-not-in-prompt", "text") is False
+
+
+def test_add_caption_fails_unknown_room():
+    assert room_store.add_caption("XXXX", "p1", "text") is False
+
+
+# ---------------------------------------------------------------------------
+# add_caption_vote
+# ---------------------------------------------------------------------------
+
+def _room_in_caption_voting():
+    code = _room_in_captioning()
+    rooms[code]["state"] = "caption_voting"
+    # Pre-populate submissions so votes are meaningful
+    rooms[code]["caption_prompt"]["submissions"] = {
+        "p1": {"caption": "A"},
+        "p2": {"caption": "B"},
+    }
+    return code
+
+
+def test_add_caption_vote_returns_true_on_success():
+    code = _room_in_caption_voting()
+    assert room_store.add_caption_vote(code, "p1", "p2") is True
+
+
+def test_add_caption_vote_records_vote():
+    code = _room_in_caption_voting()
+    room_store.add_caption_vote(code, "p1", "p2")
+    assert rooms[code]["caption_prompt"]["votes"]["p1"] == "p2"
+
+
+def test_add_caption_vote_prevents_self_vote():
+    code = _room_in_caption_voting()
+    assert room_store.add_caption_vote(code, "p1", "p1") is False
+
+
+def test_add_caption_vote_prevents_double_vote():
+    code = _room_in_caption_voting()
+    room_store.add_caption_vote(code, "p1", "p2")
+    assert room_store.add_caption_vote(code, "p1", "p2") is False
+
+
+def test_add_caption_vote_fails_invalid_voted_for():
+    code = _room_in_caption_voting()
+    assert room_store.add_caption_vote(code, "p1", "p99-not-in-prompt") is False
+
+
+def test_add_caption_vote_fails_wrong_state():
+    code = _room_in_captioning()
+    assert room_store.add_caption_vote(code, "p1", "p2") is False
+
+
+def test_add_caption_vote_fails_unknown_room():
+    assert room_store.add_caption_vote("XXXX", "p1", "p2") is False

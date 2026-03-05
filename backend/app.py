@@ -335,6 +335,71 @@ def handle_vote(data):
         game.advance_state(code, socketio)
 
 
+@socketio.on("submit:caption")
+def handle_submit_caption(data):
+    code         = data.get("room_code", "").upper()
+    caption_text = data.get("caption_text", "").strip()
+    sid          = request.sid[:8]
+
+    room = room_store.get_room(code)
+    if not room:
+        emit("error", {"message": "Room not found"})
+        return
+
+    sender = next((p for p in room["players"] if p["socket_id"] == request.sid), None)
+    if not sender:
+        emit("error", {"message": "Player not found"})
+        return
+
+    ok = room_store.add_caption(code, sender["id"], caption_text)
+    if not ok:
+        emit("error", {"message": "Could not record caption"})
+        return
+
+    log.info("room=%-4s event=submit:caption player=%-12s sid=%s", code, sender["name"], sid)
+    socketio.emit("game:state", room_store.get_room_state(code), to=code)
+
+    cp        = room.get("caption_prompt")
+    connected = [p for p in room["players"] if p["is_connected"]]
+    if cp and game.all_captions_submitted(cp, connected):
+        log.info("room=%-4s event=all_captions_submitted — advancing early", code)
+        game.cancel_timer(room)
+        game.advance_state(code, socketio)
+
+
+@socketio.on("submit:caption_vote")
+def handle_caption_vote(data):
+    code         = data.get("room_code", "").upper()
+    voted_for_id = data.get("voted_for_id", "")
+    sid          = request.sid[:8]
+
+    room = room_store.get_room(code)
+    if not room:
+        emit("error", {"message": "Room not found"})
+        return
+
+    sender = next((p for p in room["players"] if p["socket_id"] == request.sid), None)
+    if not sender:
+        emit("error", {"message": "Player not found"})
+        return
+
+    ok = room_store.add_caption_vote(code, sender["id"], voted_for_id)
+    if not ok:
+        emit("error", {"message": "Could not record caption vote"})
+        return
+
+    log.info("room=%-4s event=submit:caption_vote voter=%-12s for=%s sid=%s",
+             code, sender["name"], voted_for_id[:8], sid)
+    socketio.emit("game:state", room_store.get_room_state(code), to=code)
+
+    cp        = room.get("caption_prompt")
+    connected = [p for p in room["players"] if p["is_connected"]]
+    if cp and game.all_voted(cp, connected):
+        log.info("room=%-4s event=all_caption_votes — advancing early", code)
+        game.cancel_timer(room)
+        game.advance_state(code, socketio)
+
+
 @socketio.on("host:restart")
 def handle_restart(data):
     code = data.get("room_code", "").upper()

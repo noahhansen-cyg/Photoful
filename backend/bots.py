@@ -142,6 +142,39 @@ class Bot:
                     target=self._do_vote, args=(pid, player_ids), daemon=True
                 ).start()
 
+        elif state == "captioning":
+            cp = data.get("caption_prompt", {}) or {}
+            cp_id      = cp.get("prompt_id")
+            player_ids = cp.get("player_ids", [])
+            submitted  = cp.get("submissions", {})
+
+            if (cp_id
+                    and self.player_id in player_ids
+                    and cp_id not in self._submitted
+                    and self.player_id not in submitted):
+                self._submitted.add(cp_id)
+                threading.Thread(
+                    target=self._do_submit_caption, daemon=True
+                ).start()
+
+        elif state == "caption_voting":
+            cp = data.get("caption_prompt", {}) or {}
+            cp_id      = cp.get("prompt_id")
+            player_ids = cp.get("player_ids", [])
+            votes      = cp.get("votes", {})
+
+            if (cp_id
+                    and self.player_id in player_ids
+                    and self.role in ("player", "host")
+                    and cp_id not in self._voted
+                    and self.player_id not in votes):
+                self._voted.add(cp_id)
+                others = [pid for pid in player_ids if pid != self.player_id]
+                if others:
+                    threading.Thread(
+                        target=self._do_caption_vote, args=(others,), daemon=True
+                    ).start()
+
         elif state == "final" and not self._game_over:
             self._game_over = True
             self._print_results(data.get("players", []))
@@ -159,6 +192,23 @@ class Bot:
             print(f"[{self.name}] submitted photo for prompt {prompt_id[:8]}")
         except Exception as exc:
             print(f"[{self.name}] upload error: {exc}")
+
+    def _do_submit_caption(self):
+        time.sleep(0.5)
+        self.sio.emit("submit:caption", {
+            "room_code":    self.room_code,
+            "caption_text": f"Caption by {self.name}",
+        })
+        print(f"[{self.name}] submitted caption for caption round")
+
+    def _do_caption_vote(self, candidates):
+        time.sleep(random.uniform(5, 10))
+        voted_for = random.choice(candidates)
+        self.sio.emit("submit:caption_vote", {
+            "room_code":    self.room_code,
+            "voted_for_id": voted_for,
+        })
+        print(f"[{self.name}] voted for caption by {voted_for[:8]}")
 
     def _do_vote(self, prompt_id, player_ids):
         time.sleep(random.uniform(5, 10))

@@ -1,6 +1,7 @@
 import pytest
 import sys
 import os
+import uuid
 from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
@@ -829,3 +830,234 @@ def test_round_intro_timeout_constant_is_positive():
 
 def test_total_rounds_constant_is_two():
     assert game.TOTAL_ROUNDS == 2
+
+
+# ---------------------------------------------------------------------------
+# Caption round — find_best_photo
+# ---------------------------------------------------------------------------
+
+def _make_prompt_with_votes(player_ids, votes, submissions=None):
+    subs = submissions or {}
+    return {
+        "prompt_id":   str(uuid.uuid4()),
+        "prompt_text": "Best photo",
+        "player_ids":  player_ids,
+        "submissions": subs,
+        "votes":       votes,
+    }
+
+
+def test_find_best_photo_returns_most_voted_submission():
+    subs = {
+        "p1": {"image_url": "/img1.jpg", "caption": None},
+        "p2": {"image_url": "/img2.jpg", "caption": None},
+    }
+    prompt = _make_prompt_with_votes(["p1", "p2"],
+                                     {"v1": "p1", "v2": "p1", "v3": "p2"},
+                                     subs)
+    result = game.find_best_photo([prompt])
+    assert result["player_id"] == "p1"
+    assert result["image_url"] == "/img1.jpg"
+
+
+def test_find_best_photo_returns_none_when_no_submissions():
+    prompt = _make_prompt_with_votes(["p1", "p2"], {"v1": "p1"})
+    result = game.find_best_photo([prompt])
+    assert result is None
+
+
+def test_find_best_photo_fallback_when_no_votes():
+    subs = {"p1": {"image_url": "/img1.jpg", "caption": None}}
+    prompt = _make_prompt_with_votes(["p1", "p2"], {}, subs)
+    result = game.find_best_photo([prompt])
+    assert result is not None
+    assert result["image_url"] == "/img1.jpg"
+
+
+def test_find_best_photo_returns_none_when_prompts_empty():
+    result = game.find_best_photo([])
+    assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Caption round — create_caption_prompt
+# ---------------------------------------------------------------------------
+
+def test_create_caption_prompt_includes_all_player_ids():
+    players = _make_player_dicts(3)
+    best = {"player_id": "p1", "image_url": "/img.jpg", "prompt_text": "A prompt"}
+    cp = game.create_caption_prompt(players, best)
+    assert set(cp["player_ids"]) == {"p1", "p2", "p3"}
+    assert cp["round_type"] == "caption"
+    assert cp["featured_image_url"] == "/img.jpg"
+    assert cp["featured_player_id"] == "p1"
+    assert cp["submissions"] == {}
+    assert cp["votes"] == {}
+
+
+# ---------------------------------------------------------------------------
+# Caption round — all_captions_submitted / all_voted (caption)
+# ---------------------------------------------------------------------------
+
+def test_all_captions_submitted_true_when_all_submitted():
+    cp = {
+        "player_ids":  ["p1", "p2"],
+        "submissions": {"p1": {"caption": "a"}, "p2": {"caption": "b"}},
+    }
+    players = [{"id": "p1", "role": "player", "is_connected": True},
+               {"id": "p2", "role": "player", "is_connected": True}]
+    assert game.all_captions_submitted(cp, players) is True
+
+
+def test_all_captions_submitted_false_when_partial():
+    cp = {
+        "player_ids":  ["p1", "p2"],
+        "submissions": {"p1": {"caption": "a"}},
+    }
+    players = [{"id": "p1", "role": "player", "is_connected": True},
+               {"id": "p2", "role": "player", "is_connected": True}]
+    assert game.all_captions_submitted(cp, players) is False
+
+
+def test_all_voted_caption_round_allows_all_players_to_vote():
+    cp = {
+        "round_type": "caption",
+        "player_ids": ["p1", "p2", "p3"],
+        "votes":      {"p1": "p2", "p2": "p1", "p3": "p1"},
+    }
+    players = [{"id": "p1", "role": "player"}, {"id": "p2", "role": "player"},
+               {"id": "p3", "role": "player"}]
+    assert game.all_voted(cp, players) is True
+
+
+def test_all_voted_caption_round_false_when_some_not_voted():
+    cp = {
+        "round_type": "caption",
+        "player_ids": ["p1", "p2", "p3"],
+        "votes":      {"p1": "p2"},
+    }
+    players = [{"id": "p1", "role": "player"}, {"id": "p2", "role": "player"},
+               {"id": "p3", "role": "player"}]
+    assert game.all_voted(cp, players) is False
+
+
+# ---------------------------------------------------------------------------
+# Caption round — advance_state transitions
+# ---------------------------------------------------------------------------
+
+def _room_in_scores_round2_last_prompt_with_submissions():
+    """Create a room in scores state on the last prompt of round 2, with image submissions."""
+    code, player_ids = _room_in_submitting()
+    rooms[code]["state"] = "scores"
+    rooms[code]["round"] = game.TOTAL_ROUNDS
+    last_idx = len(rooms[code]["prompts"]) - 1
+    rooms[code]["current_prompt_idx"] = last_idx
+    # Add image submissions so find_best_photo has something to work with
+    for p in rooms[code]["prompts"]:
+        for pid in p["player_ids"]:
+            p["submissions"][pid] = {"image_url": f"/img_{pid}.jpg", "caption": None}
+        if p["player_ids"]:
+            p["votes"] = {"voter_x": p["player_ids"][0]}
+    return code, player_ids
+
+
+def test_advance_state_scores_to_caption_intro_after_round_2():
+    code, _ = _room_in_scores_round2_last_prompt_with_submissions()
+    mock_io = _mock_socketio()
+    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+        game.advance_state(code, mock_io)
+    assert rooms[code]["state"] == "caption_intro"
+    assert rooms[code]["caption_prompt"] is not None
+    assert rooms[code]["caption_prompt"]["round_type"] == "caption"
+
+
+def test_advance_state_scores_to_final_if_no_best_photo():
+    """Falls back to final when no photo submissions exist."""
+    code, _ = _room_in_submitting()
+    rooms[code]["state"] = "scores"
+    rooms[code]["round"] = game.TOTAL_ROUNDS
+    last_idx = len(rooms[code]["prompts"]) - 1
+    rooms[code]["current_prompt_idx"] = last_idx
+    # No submissions — find_best_photo returns None
+    mock_io = _mock_socketio()
+    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+        game.advance_state(code, mock_io)
+    assert rooms[code]["state"] == "final"
+
+
+def test_advance_state_caption_intro_to_captioning():
+    code, _ = _room_in_submitting()
+    rooms[code]["state"] = "caption_intro"
+    mock_io = _mock_socketio()
+    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+        game.advance_state(code, mock_io)
+    assert rooms[code]["state"] == "captioning"
+    assert rooms[code]["timer_end"] is not None
+
+
+def test_advance_state_captioning_to_caption_voting():
+    code, _ = _room_in_submitting()
+    rooms[code]["state"] = "captioning"
+    mock_io = _mock_socketio()
+    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+        game.advance_state(code, mock_io)
+    assert rooms[code]["state"] == "caption_voting"
+    assert rooms[code]["timer_end"] is not None
+
+
+def test_advance_state_caption_voting_to_caption_scores():
+    code, player_ids = _room_in_submitting()
+    rooms[code]["state"] = "caption_voting"
+    rooms[code]["round"] = 2
+    players = rooms[code]["players"]
+    cp = game.create_caption_prompt(players, {
+        "player_id": player_ids[0],
+        "image_url":  "/img.jpg",
+        "prompt_text": "test prompt",
+    })
+    cp["votes"] = {"voter": player_ids[0]}
+    rooms[code]["caption_prompt"] = cp
+    mock_io = _mock_socketio()
+    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+        game.advance_state(code, mock_io)
+    assert rooms[code]["state"] == "caption_scores"
+    assert rooms[code]["caption_prompt"]["score_deltas"] is not None
+
+
+def test_advance_state_caption_voting_uses_double_points():
+    code, player_ids = _room_in_submitting()
+    rooms[code]["state"] = "caption_voting"
+    rooms[code]["round"] = 2
+    p1_id = player_ids[0]
+    players = rooms[code]["players"]
+    cp = game.create_caption_prompt(players, {
+        "player_id":   p1_id,
+        "image_url":   "/img.jpg",
+        "prompt_text": "test prompt",
+    })
+    # Two votes for p1
+    cp["votes"] = {"voter1": p1_id, "voter2": p1_id}
+    rooms[code]["caption_prompt"] = cp
+    mock_io = _mock_socketio()
+    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+        game.advance_state(code, mock_io)
+    p1 = next(p for p in rooms[code]["players"] if p["id"] == p1_id)
+    assert p1["score"] == game.POINTS_PER_VOTE * 2 * 2  # 2 votes × 2× multiplier
+
+
+def test_advance_state_caption_scores_to_final():
+    code, _ = _room_in_submitting()
+    rooms[code]["state"] = "caption_scores"
+    mock_io = _mock_socketio()
+    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+        game.advance_state(code, mock_io)
+    assert rooms[code]["state"] == "final"
+    assert rooms[code]["timer_end"] is None
+
+
+def test_caption_intro_timeout_constant_is_positive():
+    assert game.CAPTION_INTRO_TIMEOUT > 0
+
+
+def test_caption_timeout_constant_is_positive():
+    assert game.CAPTION_TIMEOUT > 0

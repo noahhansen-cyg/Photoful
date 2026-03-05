@@ -578,3 +578,136 @@ def test_restart_unknown_room_emits_error(client):
     client.emit("host:restart", {"room_code": "XXXX"})
     received = client.get_received()
     assert "error" in _received_names(received)
+
+
+# ---------------------------------------------------------------------------
+# submit:caption
+# ---------------------------------------------------------------------------
+
+def _setup_room_in_captioning(code, player_id):
+    """Force the room into captioning state with a caption_prompt."""
+    rooms[code]["state"] = "captioning"
+    rooms[code]["caption_prompt"] = {
+        "prompt_id":            "cp-1",
+        "round_type":           "caption",
+        "featured_image_url":   "/img.jpg",
+        "featured_player_id":   player_id,
+        "featured_prompt_text": "A prompt",
+        "player_ids":           [player_id],
+        "submissions":          {},
+        "votes":                {},
+        "score_deltas":         {},
+    }
+
+
+def test_submit_caption_records_caption(client):
+    code = room_store.create_room()["code"]
+    client.emit("player:join", {"room_code": code, "name": "Alice", "role": "player"})
+    received = client.get_received()
+    player_id = next(r["args"][0]["player_id"] for r in received if r["name"] == "player:self")
+    _setup_room_in_captioning(code, player_id)
+    client.emit("submit:caption", {"room_code": code, "caption_text": "My caption"})
+    client.get_received()
+    assert rooms[code]["caption_prompt"]["submissions"][player_id]["caption"] == "My caption"
+
+
+def test_submit_caption_broadcasts_game_state(client):
+    code = room_store.create_room()["code"]
+    client.emit("player:join", {"room_code": code, "name": "Alice", "role": "player"})
+    received = client.get_received()
+    player_id = next(r["args"][0]["player_id"] for r in received if r["name"] == "player:self")
+    _setup_room_in_captioning(code, player_id)
+    client.emit("submit:caption", {"room_code": code, "caption_text": "My caption"})
+    received = client.get_received()
+    assert "game:state" in _received_names(received)
+
+
+def test_submit_caption_advances_early_when_all_submitted(client):
+    """When the sole player submits, the state should advance to caption_voting."""
+    code = room_store.create_room()["code"]
+    client.emit("player:join", {"room_code": code, "name": "Alice", "role": "player"})
+    received = client.get_received()
+    player_id = next(r["args"][0]["player_id"] for r in received if r["name"] == "player:self")
+    _setup_room_in_captioning(code, player_id)
+    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+        client.emit("submit:caption", {"room_code": code, "caption_text": "My caption"})
+        client.get_received()
+    assert rooms[code]["state"] == "caption_voting"
+
+
+def test_submit_caption_unknown_room_emits_error(client):
+    client.emit("submit:caption", {"room_code": "XXXX", "caption_text": "text"})
+    received = client.get_received()
+    assert "error" in _received_names(received)
+
+
+# ---------------------------------------------------------------------------
+# submit:caption_vote
+# ---------------------------------------------------------------------------
+
+def _setup_room_in_caption_voting(code, voter_id, candidate_id):
+    """Force room into caption_voting with voter and candidate in the prompt."""
+    rooms[code]["state"] = "caption_voting"
+    rooms[code]["caption_prompt"] = {
+        "prompt_id":            "cp-1",
+        "round_type":           "caption",
+        "featured_image_url":   "/img.jpg",
+        "featured_player_id":   candidate_id,
+        "featured_prompt_text": "A prompt",
+        "player_ids":           [voter_id, candidate_id],
+        "submissions":          {
+            voter_id:     {"caption": "A"},
+            candidate_id: {"caption": "B"},
+        },
+        "votes":        {},
+        "score_deltas": {},
+    }
+
+
+def test_submit_caption_vote_records_vote(client):
+    code = room_store.create_room()["code"]
+    client.emit("player:join", {"room_code": code, "name": "Alice", "role": "player"})
+    received = client.get_received()
+    voter_id = next(r["args"][0]["player_id"] for r in received if r["name"] == "player:self")
+    candidate_id = "other-player"
+    _add_player_direct(code, candidate_id, "Bob")
+    _setup_room_in_caption_voting(code, voter_id, candidate_id)
+    client.emit("submit:caption_vote", {"room_code": code, "voted_for_id": candidate_id})
+    client.get_received()
+    assert rooms[code]["caption_prompt"]["votes"][voter_id] == candidate_id
+
+
+def test_submit_caption_vote_broadcasts_game_state(client):
+    code = room_store.create_room()["code"]
+    client.emit("player:join", {"room_code": code, "name": "Alice", "role": "player"})
+    received = client.get_received()
+    voter_id = next(r["args"][0]["player_id"] for r in received if r["name"] == "player:self")
+    candidate_id = "other-player"
+    _add_player_direct(code, candidate_id, "Bob")
+    _setup_room_in_caption_voting(code, voter_id, candidate_id)
+    client.emit("submit:caption_vote", {"room_code": code, "voted_for_id": candidate_id})
+    received = client.get_received()
+    assert "game:state" in _received_names(received)
+
+
+def test_submit_caption_vote_advances_early_when_all_voted(client):
+    """When the last eligible voter votes, the state advances to caption_scores."""
+    code = room_store.create_room()["code"]
+    client.emit("player:join", {"room_code": code, "name": "Alice", "role": "player"})
+    received = client.get_received()
+    voter_id = next(r["args"][0]["player_id"] for r in received if r["name"] == "player:self")
+    candidate_id = "other-player"
+    _add_player_direct(code, candidate_id, "Bob")
+    _setup_room_in_caption_voting(code, voter_id, candidate_id)
+    # Pre-populate Bob's vote so Alice's vote completes all_voted
+    rooms[code]["caption_prompt"]["votes"][candidate_id] = voter_id
+    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+        client.emit("submit:caption_vote", {"room_code": code, "voted_for_id": candidate_id})
+        client.get_received()
+    assert rooms[code]["state"] == "caption_scores"
+
+
+def test_submit_caption_vote_unknown_room_emits_error(client):
+    client.emit("submit:caption_vote", {"room_code": "XXXX", "voted_for_id": "p1"})
+    received = client.get_received()
+    assert "error" in _received_names(received)
