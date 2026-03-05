@@ -722,3 +722,210 @@ describe("Round badge in voting screen", () => {
     expect(screen.queryByText(/2×/i)).not.toBeInTheDocument();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Caption Intro screen
+// ---------------------------------------------------------------------------
+
+describe("Caption Intro screen", () => {
+  const captionPrompt = {
+    prompt_id:            "cp-1",
+    round_type:           "caption",
+    featured_image_url:   "/uploads/ABCD/featured.jpg",
+    featured_player_id:   "1",
+    featured_prompt_text: "Funniest pet photo",
+    player_ids:           ["1", "2"],
+    submissions:          {},
+    votes:                {},
+    score_deltas:         {},
+  };
+
+  function emitCaptionIntro() {
+    emit("game:state", {
+      state:          "caption_intro",
+      round:          2,
+      timer_end:      Date.now() / 1000 + 7,
+      caption_prompt: captionPrompt,
+      players:        [
+        { id: "1", name: "Alice", role: "player", avatar_color: "#FF6B6B" },
+        { id: "2", name: "Bob",   role: "player", avatar_color: "#4ECDC4" },
+      ],
+      prompts: [], current_prompt: null,
+    });
+  }
+
+  it("renders 'Final Round' text", () => {
+    renderTV();
+    act(() => emitCaptionIntro());
+    expect(screen.getByText(/final round/i)).toBeInTheDocument();
+  });
+
+  it("renders 'Caption Challenge' text", () => {
+    renderTV();
+    act(() => emitCaptionIntro());
+    expect(screen.getByText(/caption challenge/i)).toBeInTheDocument();
+  });
+
+  it("renders the featured photo", () => {
+    renderTV();
+    act(() => emitCaptionIntro());
+    const img = screen.getByRole("img", { name: /featured/i });
+    expect(img).toHaveAttribute("src", "/uploads/ABCD/featured.jpg");
+  });
+
+  it("renders a timer", () => {
+    renderTV();
+    act(() => emitCaptionIntro());
+    expect(screen.getByText(/\ds$/)).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Captioning screen
+// ---------------------------------------------------------------------------
+
+describe("Captioning screen", () => {
+  const captionPrompt = {
+    prompt_id:            "cp-1",
+    round_type:           "caption",
+    featured_image_url:   "/uploads/ABCD/featured.jpg",
+    featured_player_id:   "1",
+    featured_prompt_text: "Funniest pet photo",
+    player_ids:           ["1", "2"],
+    submissions:          { "1": { caption: "test" } },
+    votes:                {},
+    score_deltas:         {},
+  };
+  const players = [
+    { id: "1", name: "Alice", role: "player", avatar_color: "#FF6B6B" },
+    { id: "2", name: "Bob",   role: "player", avatar_color: "#4ECDC4" },
+  ];
+
+  it("renders caption submission progress", () => {
+    renderTV();
+    act(() => emit("game:state", {
+      state: "captioning", round: 2,
+      timer_end: Date.now() / 1000 + 60,
+      caption_prompt: captionPrompt,
+      players, prompts: [], current_prompt: null,
+    }));
+    const progress = screen.getByTestId("caption-progress");
+    expect(progress).toBeInTheDocument();
+    expect(progress.textContent).toMatch(/1 \/ 2/);
+  });
+
+  it("renders the featured photo", () => {
+    renderTV();
+    act(() => emit("game:state", {
+      state: "captioning", round: 2,
+      timer_end: Date.now() / 1000 + 60,
+      caption_prompt: captionPrompt,
+      players, prompts: [], current_prompt: null,
+    }));
+    expect(screen.getByRole("img", { name: /featured/i })).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Caption Voting screen
+// ---------------------------------------------------------------------------
+
+describe("Caption Voting screen", () => {
+  const players = [
+    { id: "1", name: "Alice", role: "player", avatar_color: "#FF6B6B" },
+    { id: "2", name: "Bob",   role: "player", avatar_color: "#4ECDC4" },
+  ];
+  const captionPrompt = {
+    prompt_id:            "cp-1",
+    round_type:           "caption",
+    featured_image_url:   "/uploads/ABCD/featured.jpg",
+    featured_player_id:   "1",
+    featured_prompt_text: "Funniest pet photo",
+    player_ids:           ["1", "2"],
+    submissions:          {
+      "1": { caption: "Alice's funny caption" },
+      "2": { caption: "Bob's funny caption" },
+    },
+    votes:        {},
+    score_deltas: {},
+  };
+
+  it("renders caption cards after reveal delay", async () => {
+    vi.useFakeTimers();
+    renderTV();
+    act(() => emit("game:state", {
+      state: "caption_voting", round: 2,
+      timer_end: Date.now() / 1000 + 30,
+      caption_prompt: captionPrompt,
+      players, prompts: [], current_prompt: null,
+    }));
+    act(() => vi.advanceTimersByTime(3500));
+    vi.useRealTimers();
+    const cards = screen.getByTestId("caption-cards");
+    expect(cards).toBeInTheDocument();
+    expect(screen.getByText(/Alice's funny caption/)).toBeInTheDocument();
+    expect(screen.getByText(/Bob's funny caption/)).toBeInTheDocument();
+  });
+
+  it("renders vote counts", async () => {
+    vi.useFakeTimers();
+    const votedPrompt = { ...captionPrompt, votes: { "voter": "1" } };
+    renderTV();
+    act(() => emit("game:state", {
+      state: "caption_voting", round: 2,
+      timer_end: Date.now() / 1000 + 30,
+      caption_prompt: votedPrompt,
+      players, prompts: [], current_prompt: null,
+    }));
+    act(() => vi.advanceTimersByTime(3500));
+    vi.useRealTimers();
+    expect(screen.getByText(/1 vote$/)).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Caption Scores screen
+// ---------------------------------------------------------------------------
+
+describe("Caption Scores screen", () => {
+  const players = [
+    { id: "1", name: "Alice", role: "player", avatar_color: "#FF6B6B" },
+    { id: "2", name: "Bob",   role: "player", avatar_color: "#4ECDC4" },
+  ];
+  const captionPrompt = {
+    prompt_id:            "cp-1",
+    round_type:           "caption",
+    featured_image_url:   "/uploads/ABCD/featured.jpg",
+    featured_player_id:   "1",
+    featured_prompt_text: "Funniest pet photo",
+    player_ids:           ["1", "2"],
+    submissions: {
+      "1": { caption: "Alice wins!" },
+      "2": { caption: "Bob tries" },
+    },
+    votes:        { "2": "1" },
+    score_deltas: { "1": 2000, "2": 0 },
+  };
+
+  it("renders the winner announcement", () => {
+    renderTV();
+    act(() => emit("game:state", {
+      state: "caption_scores", round: 2,
+      caption_prompt: captionPrompt,
+      players, prompts: [], current_prompt: null,
+    }));
+    expect(screen.getByText(/alice wins the caption round/i)).toBeInTheDocument();
+  });
+
+  it("renders score deltas for the winner", () => {
+    renderTV();
+    act(() => emit("game:state", {
+      state: "caption_scores", round: 2,
+      caption_prompt: captionPrompt,
+      players, prompts: [], current_prompt: null,
+    }));
+    const scoreCards = screen.getAllByTestId("caption-score-card");
+    expect(scoreCards.length).toBeGreaterThan(0);
+    expect(screen.getByTestId("caption-score-delta")).toBeInTheDocument();
+  });
+});

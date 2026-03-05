@@ -25,6 +25,7 @@ def create_room():
         "current_prompt_idx": 0,
         "timer_end":          None, # unix timestamp (float) when current timer expires
         "timer_greenlet":     None, # gevent greenlet handle for cancellation
+        "caption_prompt":     None, # caption-round dict (final round)
     }
     return rooms[code]
 
@@ -75,6 +76,18 @@ def add_submission(code, prompt_id, player_id, image_url, caption=None):
     return True
 
 
+def add_caption(code, player_id, caption_text):
+    """Record a text caption for the caption round. Returns True on success."""
+    room = rooms.get(code)
+    if not room or room["state"] != "captioning":
+        return False
+    cp = room.get("caption_prompt")
+    if not cp or player_id not in cp["player_ids"]:
+        return False
+    cp["submissions"][player_id] = {"caption": caption_text}
+    return True
+
+
 def add_vote(code, prompt_id, voter_id, voted_for_id):
     """Record a vote. Returns True on success, False if invalid."""
     room = rooms.get(code)
@@ -90,6 +103,24 @@ def add_vote(code, prompt_id, voter_id, voted_for_id):
     if voted_for_id not in prompt["player_ids"]:
         return False
     prompt["votes"][voter_id] = voted_for_id
+    return True
+
+
+def add_caption_vote(code, voter_id, voted_for_id):
+    """Record a caption vote. Returns True on success, False if invalid."""
+    room = rooms.get(code)
+    if not room or room["state"] != "caption_voting":
+        return False
+    cp = room.get("caption_prompt")
+    if not cp:
+        return False
+    if voter_id == voted_for_id:
+        return False  # can't vote for yourself
+    if voter_id in cp["votes"]:
+        return False  # can't vote twice
+    if voted_for_id not in cp["player_ids"]:
+        return False
+    cp["votes"][voter_id] = voted_for_id
     return True
 
 
@@ -130,6 +161,7 @@ def get_room_state(code):
         "players":        connected_players,
         "prompts":        room["prompts"],    # all prompts (used during submitting phase)
         "current_prompt": prompt,             # the active prompt for voting/scores
+        "caption_prompt": room.get("caption_prompt"),
         "timer_end":      room.get("timer_end"),
         "prompt_number":  idx + 1 if total else 0,
         "total_prompts":  total,
@@ -150,6 +182,7 @@ def reset_room(code):
     room["current_prompt_idx"]  = 0
     room["timer_end"]           = None
     room["timer_greenlet"]      = None
+    room["caption_prompt"]      = None
     for p in room["players"]:
         p["score"] = 0
     return True

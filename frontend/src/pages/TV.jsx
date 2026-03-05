@@ -54,8 +54,12 @@ export default function TV() {
         {state === "submitting"  && <SubmittingScreen gameState={gameState} players={players} timeLeft={timeLeft} />}
         {state === "voting"      && <VotingScreen gameState={gameState} players={players} timeLeft={timeLeft} />}
         {state === "scores"      && <ScoresScreen gameState={gameState} players={players} timeLeft={timeLeft} />}
-        {state === "round_intro" && <RoundIntroScreen gameState={gameState} timeLeft={timeLeft} />}
-        {state === "final"       && <FinalScreen players={players} />}
+        {state === "round_intro"    && <RoundIntroScreen gameState={gameState} timeLeft={timeLeft} />}
+        {state === "caption_intro"  && <CaptionIntroScreen gameState={gameState} timeLeft={timeLeft} />}
+        {state === "captioning"     && <CaptioningScreen gameState={gameState} players={players} timeLeft={timeLeft} />}
+        {state === "caption_voting" && <CaptionVotingScreen gameState={gameState} players={players} timeLeft={timeLeft} />}
+        {state === "caption_scores" && <CaptionScoresScreen gameState={gameState} players={players} />}
+        {state === "final"          && <FinalScreen players={players} />}
       </div>
     </div>
   );
@@ -293,6 +297,139 @@ function RoundIntroScreen({ gameState, timeLeft }) {
 }
 
 // ---------------------------------------------------------------------------
+// Caption Intro
+// ---------------------------------------------------------------------------
+
+function CaptionIntroScreen({ gameState, timeLeft }) {
+  const cp = gameState?.caption_prompt;
+  return (
+    <div style={styles.centered}>
+      <div style={styles.roundIntroBadge}>Final Round</div>
+      <h2 style={styles.bigLabel}>Caption Challenge!</h2>
+      <p style={styles.hint}>Write the funniest caption for the winning photo</p>
+      {cp?.featured_image_url && (
+        <img src={cp.featured_image_url} style={styles.featuredPhoto} alt="Featured" />
+      )}
+      <TimerBar timeLeft={timeLeft} total={7} />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Captioning
+// ---------------------------------------------------------------------------
+
+function CaptioningScreen({ gameState, players, timeLeft }) {
+  const cp         = gameState?.caption_prompt;
+  const submitted  = Object.keys(cp?.submissions ?? {}).length;
+  const total      = players.filter(p => p.role !== "tv").length;
+  return (
+    <div style={styles.centered}>
+      <div style={styles.roundIntroBadge}>Final Round</div>
+      <h2 style={styles.bigLabel}>Write your caption!</h2>
+      {cp?.featured_image_url && (
+        <img src={cp.featured_image_url} style={styles.featuredPhoto} alt="Featured" />
+      )}
+      <p data-testid="caption-progress" style={styles.hint}>{submitted} / {total} captions submitted</p>
+      <TimerBar timeLeft={timeLeft} total={60} />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Caption Voting
+// ---------------------------------------------------------------------------
+
+function CaptionVotingScreen({ gameState, players, timeLeft }) {
+  const cp          = gameState?.caption_prompt;
+  const submissions = cp?.submissions ?? {};
+  const votes       = cp?.votes ?? {};
+  const playerIds   = cp?.player_ids ?? [];
+  const voteCount   = (pid) => Object.values(votes).filter(v => v === pid).length;
+  const getPlayer   = (id) => players.find(p => p.id === id);
+
+  const [captionsVisible, setCaptionsVisible] = useState(false);
+  const cpId = cp?.prompt_id;
+  useEffect(() => {
+    setCaptionsVisible(false);
+    const t = setTimeout(() => setCaptionsVisible(true), 3000);
+    return () => clearTimeout(t);
+  }, [cpId]);
+
+  return (
+    <div style={styles.centered}>
+      <div style={styles.roundIntroBadge}>Final Round — 2× Points</div>
+      {cp?.featured_image_url && (
+        <img src={cp.featured_image_url} style={styles.featuredPhoto} alt="Featured" />
+      )}
+      <TimerBar timeLeft={timeLeft} total={30} />
+      <div data-testid="caption-cards" style={{ ...styles.captionGrid, opacity: captionsVisible ? 1 : 0, transition: captionsVisible ? "opacity 3s ease-in" : "none" }}>
+        {playerIds.map(pid => {
+          const sub    = submissions[pid];
+          const player = getPlayer(pid);
+          if (!sub) return null;
+          return (
+            <div key={pid} style={styles.captionCard}>
+              <div style={styles.captionText}>"{sub.caption}"</div>
+              <div style={styles.captionAuthor(player?.avatar_color)}>{player?.name}</div>
+              <div style={styles.voteCount}>{voteCount(pid)} vote{voteCount(pid) !== 1 ? "s" : ""}</div>
+            </div>
+          );
+        })}
+      </div>
+      <p style={styles.hint}>Vote on your phone!</p>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Caption Scores
+// ---------------------------------------------------------------------------
+
+function CaptionScoresScreen({ gameState, players }) {
+  const cp      = gameState?.caption_prompt;
+  const subs    = cp?.submissions ?? {};
+  const deltas  = cp?.score_deltas ?? {};
+  const pids    = cp?.player_ids ?? [];
+  const getPlayer = (id) => players.find(p => p.id === id);
+
+  const maxDelta  = Math.max(0, ...pids.map(pid => deltas[pid] ?? 0));
+  const winnerIds = pids.filter(pid => (deltas[pid] ?? 0) === maxDelta && maxDelta > 0);
+  const isTie     = winnerIds.length > 1;
+  const winner    = winnerIds.length === 1 ? getPlayer(winnerIds[0]) : null;
+
+  const headline = maxDelta === 0
+    ? "No votes this round!"
+    : isTie ? "It's a tie!" : `${winner?.name} wins the caption round!`;
+
+  return (
+    <div style={styles.centered}>
+      <h2 style={styles.bigLabel}>{headline}</h2>
+      {cp?.featured_image_url && (
+        <img src={cp.featured_image_url} style={{ ...styles.featuredPhoto, maxHeight: 200 }} alt="Featured" />
+      )}
+      <div style={styles.captionGrid}>
+        {pids.map(pid => {
+          const sub      = subs[pid];
+          const player   = getPlayer(pid);
+          const isWinner = winnerIds.includes(pid);
+          if (!sub) return null;
+          return (
+            <div key={pid} data-testid="caption-score-card" style={{ ...styles.captionCard, outline: isWinner ? "3px solid #4ecdc4" : "none" }}>
+              <div style={styles.captionText}>"{sub.caption}"</div>
+              <div style={styles.captionAuthor(player?.avatar_color)}>{player?.name}</div>
+              {(deltas[pid] ?? 0) > 0 && (
+                <div data-testid="caption-score-delta" style={styles.voteCount}>+{deltas[pid].toLocaleString()} pts</div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Final
 // ---------------------------------------------------------------------------
 
@@ -413,6 +550,12 @@ const styles = {
 
   roundIntroBadge: { fontSize: "3rem", fontWeight: "bold", color: "#6c63ff" },
   roundBadge: { background: "#6c63ff22", border: "1px solid #6c63ff", borderRadius: 999, padding: "0.3rem 0.9rem", fontSize: "0.85rem", color: "#6c63ff" },
+
+  featuredPhoto: { maxWidth: "480px", width: "100%", maxHeight: "320px", objectFit: "cover", borderRadius: 14, border: "3px solid #4ecdc4" },
+  captionGrid:   { display: "flex", flexWrap: "wrap", gap: "1.5rem", justifyContent: "center", maxWidth: "900px" },
+  captionCard:   { background: "#1a1a2e", borderRadius: 12, padding: "1.25rem 1.5rem", maxWidth: "280px", minWidth: "200px", display: "flex", flexDirection: "column", gap: "0.6rem", textAlign: "center" },
+  captionText:   { fontSize: "1.2rem", color: "#fff", fontStyle: "italic", lineHeight: 1.4 },
+  captionAuthor: (color) => ({ fontSize: "1rem", fontWeight: "bold", color: color ?? "#6c63ff" }),
 
   crownEmoji:  { fontSize: "5rem" },
   winnerName:  { fontSize: "2rem", color: "#6c63ff", fontWeight: "bold", margin: 0 },
