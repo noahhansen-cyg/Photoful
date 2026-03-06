@@ -459,12 +459,28 @@ def _room_in_submitting(n=2):
     return code, player_ids
 
 
-def test_advance_state_submitting_to_voting():
+def test_advance_state_submitting_to_voting_intro():
     code, _ = _room_in_submitting()
     mock_io = _mock_socketio()
     with patch("game._start_timer", return_value=MagicMock(dead=False)):
         game.advance_state(code, mock_io)
+    assert rooms[code]["state"] == "voting_intro"
+    assert rooms[code]["current_prompt_idx"] == 0
+    assert rooms[code]["timer_end"] is not None
+
+
+def test_advance_state_voting_intro_to_voting():
+    code, _ = _room_in_submitting()
+    rooms[code]["state"] = "voting_intro"
+    mock_io = _mock_socketio()
+    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+        game.advance_state(code, mock_io)
     assert rooms[code]["state"] == "voting"
+    assert rooms[code]["timer_end"] is not None
+
+
+def test_voting_intro_timeout_constant_is_positive():
+    assert game.VOTING_INTRO_TIMEOUT > 0
 
 
 def test_advance_state_voting_to_scores():

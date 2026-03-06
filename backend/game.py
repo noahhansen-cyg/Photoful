@@ -19,7 +19,8 @@ SCORES_TIMEOUT = 5    # seconds scores screen is shown before advancing
 
 POINTS_PER_VOTE       = 1000
 PROMPTS_PER_PLAYER    = 2
-ROUND_INTRO_TIMEOUT   = 7   # seconds the "Round N!" screen is shown before voting resumes
+VOTING_INTRO_TIMEOUT  = 5   # seconds the "Round N — Let's Vote!" screen is shown before voting
+ROUND_INTRO_TIMEOUT   = 7   # seconds the "Round N!" screen is shown before next submitting phase
 TOTAL_ROUNDS          = 2   # total number of photo voting rounds
 CAPTION_INTRO_TIMEOUT = 7   # seconds showing featured photo before captioning
 CAPTION_TIMEOUT       = 60  # seconds to submit text captions
@@ -216,8 +217,15 @@ def advance_state(room_code, socketio):
     prompt = room["prompts"][idx] if idx < total else None
 
     if state == "submitting":
-        # All prompts were submitted simultaneously; start voting from the first prompt.
+        # All prompts submitted — show a brief "Round N" intro before voting starts.
         room["current_prompt_idx"] = 0
+        room["state"]    = "voting_intro"
+        room["timer_end"] = time.time() + VOTING_INTRO_TIMEOUT
+        room["timer_greenlet"] = _start_timer(
+            room_code, VOTING_INTRO_TIMEOUT, lambda: advance_state(room_code, socketio), socketio
+        )
+
+    elif state == "voting_intro":
         room["state"]    = "voting"
         room["timer_end"] = time.time() + VOTE_TIMEOUT
         room["timer_greenlet"] = _start_timer(

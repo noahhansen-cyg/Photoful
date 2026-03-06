@@ -137,8 +137,9 @@ export default function Phone() {
       {error && <p style={styles.error}>{error}</p>}
 
       {state === "lobby"       && <LobbyScreen myRole={myRole} players={players} code={code} name={name} />}
-      {state === "submitting"  && <SubmittingScreen code={code} allPrompts={allPrompts} myPlayerId={myPlayerId} timeLeft={timeLeft} />}
-      {state === "voting"      && <VotingScreen code={code} prompt={prompt} myPlayerId={myPlayerId} isAssigned={isAssigned} players={players} />}
+      {state === "submitting"    && <SubmittingScreen code={code} allPrompts={allPrompts} myPlayerId={myPlayerId} timeLeft={timeLeft} />}
+      {state === "voting_intro"  && <VotingIntroScreen round={gameState?.round ?? 1} />}
+      {state === "voting"        && <VotingScreen code={code} prompt={prompt} myPlayerId={myPlayerId} isAssigned={isAssigned} players={players} />}
       {state === "scores"      && <ScoresScreen gameState={gameState} players={players} myPlayerId={myPlayerId} />}
       {state === "round_intro"    && <RoundIntroScreen round={gameState?.round ?? 2} />}
       {state === "caption_intro"  && <CaptionIntroScreen />}
@@ -458,6 +459,16 @@ function ScoresScreen({ gameState, players, myPlayerId }) {
 // ---------------------------------------------------------------------------
 // Round Intro
 // ---------------------------------------------------------------------------
+
+function VotingIntroScreen({ round }) {
+  const isDouble = round > 1;
+  return (
+    <div style={styles.section}>
+      <p style={styles.label}>Round {round}</p>
+      <p style={styles.hint}>{isDouble ? "Double Points — time to vote!" : "Get ready to vote!"}</p>
+    </div>
+  );
+}
 
 function RoundIntroScreen({ round }) {
   return (

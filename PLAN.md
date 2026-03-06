@@ -43,7 +43,13 @@ LOBBY
 SUBMITTING  (120s)
   All prompts are active simultaneously. Each player sees all their assigned
   prompts at once and submits a photo for each.
-  → (all players submitted for all prompts, OR timer expires) → VOTING
+  → (all players submitted for all prompts, OR timer expires) → VOTING_INTRO
+
+VOTING_INTRO  (5s)
+  Brief transition screen: "Round 1 — Let's Vote!" (round 1) or
+  "Round 2 — Double Points!" (round 2). Gives players a moment to put
+  their phones down after submitting before voting begins.
+  → (timer expires) → VOTING
 
 VOTING  (30s per prompt)
   TV shows two competing photos side-by-side.
@@ -97,9 +103,9 @@ All state is in-memory (Python dicts). No database.
 # Room
 {
     "room_code":           str,         # "ABCD"
-    "state":               str,         # lobby | submitting | voting | scores | round_intro
-                                        # | caption_intro | captioning | caption_voting
-                                        # | caption_scores | final
+    "state":               str,         # lobby | submitting | voting_intro | voting | scores
+                                        # | round_intro | caption_intro | captioning
+                                        # | caption_voting | caption_scores | final
     "round":               int,         # current voting round (1-indexed); doubles points each round
     "players":             list[Player],
     "prompts":             list[Prompt],
@@ -176,7 +182,7 @@ All state is in-memory (Python dicts). No database.
 ```json
 {
   "room_code": "ABCD",
-  "state": "lobby|submitting|voting|scores|round_intro|caption_intro|captioning|caption_voting|caption_scores|final",
+  "state": "lobby|submitting|voting_intro|voting|scores|round_intro|caption_intro|captioning|caption_voting|caption_scores|final",
   "round": 1,
   "players": [{"id", "name", "role", "avatar_color", "score", "is_connected"}],
   "prompts": [...],
@@ -258,8 +264,10 @@ def _start_timer(room_code, seconds, callback, socketio):
 
 Timeouts:
 - Submit: 120s
+- Voting intro: 5s
 - Vote: 30s
 - Scores display: 5s
+- Round intro: 7s
 - Caption intro: 7s
 - Captioning: 60s
 - Caption scores: 5s
@@ -345,6 +353,13 @@ Timeouts:
 - Bots auto-submit captions and auto-vote in the caption round
 - Fallback: if no photo submissions exist after round 2, game goes directly to `final`
 - Full test suite: 243 backend tests (41 new) + 173 frontend tests (15 new)
+
+### Sprint 8 — Voting Intro Transition ✅
+- Added `VOTING_INTRO` state (5s) between `submitting` and the first `voting` prompt in every round
+- TV shows "Round 1 — Let's Vote!" (round 1) or "Round 2 — Double Points!" (round 2) with a TimerBar
+- Phone shows the round number and a "Get ready to vote!" / "Double Points — time to vote!" hint
+- Eliminates the jarring jump from the submission phase directly into photo comparison voting
+- Full test suite: 245 backend tests + 180 frontend tests
 
 ### Sprint 3 — Polish (planned)
 - Sound effects

@@ -51,8 +51,9 @@ export default function TV() {
       <Header code={code} connected={connected} />
       <div style={styles.body}>
         {state === "lobby"       && <LobbyScreen players={players} code={code} />}
-        {state === "submitting"  && <SubmittingScreen gameState={gameState} players={players} timeLeft={timeLeft} />}
-        {state === "voting"      && <VotingScreen gameState={gameState} players={players} timeLeft={timeLeft} />}
+        {state === "submitting"    && <SubmittingScreen gameState={gameState} players={players} timeLeft={timeLeft} />}
+        {state === "voting_intro"  && <VotingIntroScreen gameState={gameState} timeLeft={timeLeft} />}
+        {state === "voting"        && <VotingScreen gameState={gameState} players={players} timeLeft={timeLeft} />}
         {state === "scores"      && <ScoresScreen gameState={gameState} players={players} timeLeft={timeLeft} />}
         {state === "round_intro"    && <RoundIntroScreen gameState={gameState} timeLeft={timeLeft} />}
         {state === "caption_intro"  && <CaptionIntroScreen gameState={gameState} timeLeft={timeLeft} />}
@@ -283,6 +284,19 @@ function ScoresScreen({ gameState, players, timeLeft }) {
 // ---------------------------------------------------------------------------
 // Round Intro
 // ---------------------------------------------------------------------------
+
+function VotingIntroScreen({ gameState, timeLeft }) {
+  const round = gameState?.round ?? 1;
+  const isDouble = round > 1;
+  return (
+    <div style={styles.centered}>
+      <div style={styles.roundIntroBadge}>Round {round}</div>
+      <h2 style={styles.bigLabel}>{isDouble ? "Double Points!" : "Let's Vote!"}</h2>
+      {isDouble && <p style={styles.hint}>Every vote is worth 2,000 pts</p>}
+      <TimerBar timeLeft={timeLeft} total={5} />
+    </div>
+  );
+}
 
 function RoundIntroScreen({ gameState, timeLeft }) {
   const round = gameState?.round ?? 2;

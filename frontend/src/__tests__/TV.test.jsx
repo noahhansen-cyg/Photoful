@@ -631,6 +631,47 @@ describe("TV voting screen — photo reveal animation", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Voting Intro screen
+// ---------------------------------------------------------------------------
+
+describe("Voting Intro screen", () => {
+  function emitVotingIntro(round = 1) {
+    emit("game:state", {
+      state: "voting_intro",
+      round,
+      timer_end: Date.now() / 1000 + 5,
+      players: [],
+      prompts: [],
+      current_prompt: null,
+    });
+  }
+
+  it("renders 'Round 1' when state is voting_intro for round 1", () => {
+    renderTV();
+    act(() => emitVotingIntro(1));
+    expect(screen.getByText(/round 1/i)).toBeInTheDocument();
+  });
+
+  it("shows 'Let's Vote!' for round 1", () => {
+    renderTV();
+    act(() => emitVotingIntro(1));
+    expect(screen.getByText(/let's vote/i)).toBeInTheDocument();
+  });
+
+  it("shows 'Double Points!' for round 2", () => {
+    renderTV();
+    act(() => emitVotingIntro(2));
+    expect(screen.getByText(/double points/i)).toBeInTheDocument();
+  });
+
+  it("shows a timer", () => {
+    renderTV();
+    act(() => emitVotingIntro(1));
+    expect(screen.getByText(/\ds$/)).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Round Intro screen
 // ---------------------------------------------------------------------------
 

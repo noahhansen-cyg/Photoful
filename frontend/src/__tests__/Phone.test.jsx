@@ -987,6 +987,44 @@ describe("Phone vote lockout (3-second reveal delay)", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Voting Intro screen (phone)
+// ---------------------------------------------------------------------------
+
+describe("Phone voting intro screen", () => {
+  async function joinAndEmitVotingIntro(round = 1) {
+    renderPhone();
+    await userEvent.type(screen.getByPlaceholderText(/your name/i), "Carol");
+    await userEvent.click(screen.getByRole("button", { name: /join game/i }));
+    act(() => {
+      emit("player:self", { player_id: "p-carol", role: "player" });
+      emit("game:state", {
+        state: "voting_intro",
+        round,
+        players: [{ id: "p-carol", name: "Carol", role: "player", avatar_color: "#96CEB4" }],
+        prompts: [],
+        current_prompt: null,
+        timer_end: null,
+      });
+    });
+  }
+
+  it("shows round number when state is voting_intro", async () => {
+    await joinAndEmitVotingIntro(1);
+    expect(screen.getByText(/round 1/i)).toBeInTheDocument();
+  });
+
+  it("shows 'Get ready to vote!' for round 1", async () => {
+    await joinAndEmitVotingIntro(1);
+    expect(screen.getByText(/get ready to vote/i)).toBeInTheDocument();
+  });
+
+  it("shows 'Double Points' hint for round 2", async () => {
+    await joinAndEmitVotingIntro(2);
+    expect(screen.getByText(/double points/i)).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Round Intro screen (phone)
 // ---------------------------------------------------------------------------
 
