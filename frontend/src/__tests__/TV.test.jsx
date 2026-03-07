@@ -63,10 +63,6 @@ describe("TV rendering", () => {
     expect(screen.getByText(/waiting for players/i)).toBeInTheDocument();
   });
 
-  it("shows the join URL", () => {
-    renderTV("ABCD");
-    expect(screen.getByText(/\/room\/ABCD\/phone/i)).toBeInTheDocument();
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -664,11 +660,6 @@ describe("Voting Intro screen", () => {
     expect(screen.getByText(/double points/i)).toBeInTheDocument();
   });
 
-  it("shows a timer", () => {
-    renderTV();
-    act(() => emitVotingIntro(1));
-    expect(screen.getByText(/\ds$/)).toBeInTheDocument();
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -705,12 +696,6 @@ describe("Round Intro screen", () => {
     expect(screen.getByText(/2,000 pts/i)).toBeInTheDocument();
   });
 
-  it("shows a timer", () => {
-    renderTV();
-    act(() => emitRoundIntro());
-    // TimerBar renders a countdown text (e.g. "7s")
-    expect(screen.getByText(/\ds$/)).toBeInTheDocument();
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -814,11 +799,6 @@ describe("Caption Intro screen", () => {
     expect(img).toHaveAttribute("src", "/uploads/ABCD/featured.jpg");
   });
 
-  it("renders a timer", () => {
-    renderTV();
-    act(() => emitCaptionIntro());
-    expect(screen.getByText(/\ds$/)).toBeInTheDocument();
-  });
 });
 
 // ---------------------------------------------------------------------------

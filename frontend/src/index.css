@@ -7,3 +7,17 @@ body {
   font-family: system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
+
+@keyframes screenFade5 {
+  0%   { opacity: 0; }
+  12%  { opacity: 1; }
+  88%  { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+@keyframes screenFade7 {
+  0%   { opacity: 0; }
+  8%   { opacity: 1; }
+  92%  { opacity: 1; }
+  100% { opacity: 0; }
+}

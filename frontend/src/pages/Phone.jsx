@@ -650,7 +650,7 @@ function FinalScreen({ players, myPlayerId, myRole, code }) {
       </div>
       {myRole === "host" && (
         <button style={styles.bigBtn} onClick={playAgain}>
-          Play Again?
+          Play Again
         </button>
       )}
     </div>

@@ -1077,3 +1077,58 @@ def test_caption_intro_timeout_constant_is_positive():
 
 def test_caption_timeout_constant_is_positive():
     assert game.CAPTION_TIMEOUT > 0
+
+
+# ---------------------------------------------------------------------------
+# all_captions_submitted — no-eligible-players edge case
+# ---------------------------------------------------------------------------
+
+def test_all_captions_submitted_returns_true_when_no_eligible_players():
+    """If the only connected role is 'tv', there's nobody to submit → True."""
+    cp = {"submissions": {}, "player_ids": []}
+    tv = {"id": "tv1", "role": "tv", "is_connected": True}
+    assert game.all_captions_submitted(cp, [tv]) is True
+
+
+# ---------------------------------------------------------------------------
+# all_voted — caption round, no eligible players
+# ---------------------------------------------------------------------------
+
+def test_all_voted_caption_round_returns_true_when_no_eligible_players():
+    """Caption round with only tv connected → eligible list empty → True."""
+    prompt = {"round_type": "caption", "votes": {}, "player_ids": []}
+    tv = {"id": "tv1", "role": "tv", "is_connected": True}
+    assert game.all_voted(prompt, [tv]) is True
+
+
+# ---------------------------------------------------------------------------
+# advance_state — room not found
+# ---------------------------------------------------------------------------
+
+def test_advance_state_returns_early_when_room_not_found():
+    """advance_state must not crash and must not emit when the room is gone."""
+    mock_io = MagicMock()
+    game.advance_state("ZZZZ", mock_io)   # room does not exist
+    mock_io.emit.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# _start_timer — greenlet body
+# ---------------------------------------------------------------------------
+
+def test_start_timer_calls_callback_after_delay():
+    """The greenlet spawned by _start_timer must invoke the callback."""
+    called = []
+    code, _ = _room_with_n_players(2)
+    gl = game._start_timer(code, 0.01, lambda: called.append(True), MagicMock())
+    gl.join(timeout=2.0)
+    assert called, "callback was never invoked"
+
+
+def test_start_timer_clears_greenlet_ref_on_room():
+    """After the sleep fires, timer_greenlet on the room must be set to None."""
+    code, _ = _room_with_n_players(2)
+    rooms[code]["timer_greenlet"] = "sentinel"
+    gl = game._start_timer(code, 0.01, lambda: None, MagicMock())
+    gl.join(timeout=2.0)
+    assert rooms[code]["timer_greenlet"] is None

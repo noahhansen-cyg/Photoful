@@ -2,6 +2,7 @@ import pytest
 import sys
 import os
 import io
+from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
@@ -226,3 +227,53 @@ def test_frontend_dist_is_none_in_dev():
 def test_upload_dir_exists():
     """UPLOADS_DIR must exist as a directory immediately after module import."""
     assert os.path.isdir(app_module.UPLOADS_DIR)
+
+
+# ---------------------------------------------------------------------------
+# GET /uploads/<filename>
+# ---------------------------------------------------------------------------
+
+def test_serve_upload_returns_200_for_existing_file(client):
+    """Files placed in UPLOADS_DIR via the upload endpoint are served back."""
+    code = _room_in_submitting(client)
+    buf = _jpeg_bytes()
+    resp = client.post(
+        f"/api/rooms/{code}/upload",
+        data={"photo": (buf, "photo.jpg")},
+        content_type="multipart/form-data",
+    )
+    url = resp.get_json()["image_url"]  # e.g. /uploads/ABCD/uuid.jpg
+    # Strip leading /uploads/
+    path = url[len("/uploads/"):]
+    get_resp = client.get(f"/uploads/{path}")
+    assert get_resp.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# get_local_ip() fallback
+# ---------------------------------------------------------------------------
+
+def test_get_local_ip_falls_back_to_localhost_on_exception():
+    """When the network probe fails, get_local_ip() must return 'localhost'."""
+    with patch("app.socket.socket") as mock_sock_cls:
+        mock_sock_cls.return_value.__enter__ = MagicMock(return_value=MagicMock())
+        mock_sock_cls.return_value.connect.side_effect = OSError("no route")
+        mock_sock_cls.return_value.__exit__ = MagicMock(return_value=False)
+        # Patch directly on the socket instance created inside get_local_ip
+        with patch("socket.socket") as mock_s:
+            instance = MagicMock()
+            instance.connect.side_effect = OSError("no route")
+            mock_s.return_value = instance
+            result = app_module.get_local_ip()
+    assert result == "localhost"
+
+
+# ---------------------------------------------------------------------------
+# GET /api/server-info — APP_HOST env override
+# ---------------------------------------------------------------------------
+
+def test_server_info_uses_app_host_env_when_set(client):
+    """APP_HOST env var overrides the network probe result."""
+    with patch.dict(os.environ, {"APP_HOST": "192.168.1.42"}):
+        response = client.get("/api/server-info")
+    assert response.get_json()["local_ip"] == "192.168.1.42"
