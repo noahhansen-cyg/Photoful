@@ -51,11 +51,12 @@ export default function TV() {
       <Header code={code} connected={connected} />
       <div style={styles.body}>
         {state === "lobby"       && <LobbyScreen players={players} code={code} />}
-        {state === "submitting"  && <SubmittingScreen gameState={gameState} players={players} timeLeft={timeLeft} />}
-        {state === "voting"      && <VotingScreen gameState={gameState} players={players} timeLeft={timeLeft} />}
+        {state === "submitting"    && <SubmittingScreen gameState={gameState} players={players} timeLeft={timeLeft} />}
+        {state === "voting_intro"  && <VotingIntroScreen gameState={gameState} />}
+        {state === "voting"        && <VotingScreen gameState={gameState} players={players} timeLeft={timeLeft} />}
         {state === "scores"      && <ScoresScreen gameState={gameState} players={players} timeLeft={timeLeft} />}
-        {state === "round_intro"    && <RoundIntroScreen gameState={gameState} timeLeft={timeLeft} />}
-        {state === "caption_intro"  && <CaptionIntroScreen gameState={gameState} timeLeft={timeLeft} />}
+        {state === "round_intro"    && <RoundIntroScreen gameState={gameState} />}
+        {state === "caption_intro"  && <CaptionIntroScreen gameState={gameState} />}
         {state === "captioning"     && <CaptioningScreen gameState={gameState} players={players} timeLeft={timeLeft} />}
         {state === "caption_voting" && <CaptionVotingScreen gameState={gameState} players={players} timeLeft={timeLeft} />}
         {state === "caption_scores" && <CaptionScoresScreen gameState={gameState} players={players} />}
@@ -77,7 +78,6 @@ function Header({ code, connected }) {
         <div style={styles.roomCode}>{code}</div>
       </div>
       <div style={styles.headerRight}>
-        <span style={styles.joinHint}>{window.location.host}/room/{code}/phone</span>
         <div style={styles.dot(connected)} title={connected ? "Connected" : "Disconnected"} />
       </div>
     </div>
@@ -284,14 +284,25 @@ function ScoresScreen({ gameState, players, timeLeft }) {
 // Round Intro
 // ---------------------------------------------------------------------------
 
-function RoundIntroScreen({ gameState, timeLeft }) {
+function VotingIntroScreen({ gameState }) {
+  const round = gameState?.round ?? 1;
+  const isDouble = round > 1;
+  return (
+    <div style={{ ...styles.centered, animation: "screenFade5 5s ease forwards" }}>
+      <div style={styles.roundIntroBadge}>Round {round}</div>
+      <h2 style={styles.bigLabel}>{isDouble ? "Double Points!" : "Let's Vote!"}</h2>
+      {isDouble && <p style={styles.hint}>Every vote is worth 2,000 pts</p>}
+    </div>
+  );
+}
+
+function RoundIntroScreen({ gameState }) {
   const round = gameState?.round ?? 2;
   return (
-    <div style={styles.centered}>
+    <div style={{ ...styles.centered, animation: "screenFade7 7s ease forwards" }}>
       <div style={styles.roundIntroBadge}>Round {round}</div>
       <h2 style={styles.bigLabel}>Double Points!</h2>
       <p style={styles.hint}>Every vote is now worth 2,000 pts</p>
-      <TimerBar timeLeft={timeLeft} total={7} />
     </div>
   );
 }
@@ -300,17 +311,16 @@ function RoundIntroScreen({ gameState, timeLeft }) {
 // Caption Intro
 // ---------------------------------------------------------------------------
 
-function CaptionIntroScreen({ gameState, timeLeft }) {
+function CaptionIntroScreen({ gameState }) {
   const cp = gameState?.caption_prompt;
   return (
-    <div style={styles.centered}>
+    <div style={{ ...styles.centered, animation: "screenFade7 7s ease forwards" }}>
       <div style={styles.roundIntroBadge}>Final Round</div>
       <h2 style={styles.bigLabel}>Caption Challenge!</h2>
       <p style={styles.hint}>Write the funniest caption for the winning photo</p>
       {cp?.featured_image_url && (
         <img src={cp.featured_image_url} style={styles.featuredPhoto} alt="Featured" />
       )}
-      <TimerBar timeLeft={timeLeft} total={7} />
     </div>
   );
 }
@@ -454,7 +464,7 @@ function FinalScreen({ players }) {
           </div>
         ))}
       </div>
-      <p style={styles.hint}>Host can tap "Play Again?" on their phone to restart</p>
+      <p style={styles.hint}>Host can tap "Play Again" on their phone to restart</p>
     </div>
   );
 }

@@ -63,10 +63,6 @@ describe("TV rendering", () => {
     expect(screen.getByText(/waiting for players/i)).toBeInTheDocument();
   });
 
-  it("shows the join URL", () => {
-    renderTV("ABCD");
-    expect(screen.getByText(/\/room\/ABCD\/phone/i)).toBeInTheDocument();
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -631,6 +627,42 @@ describe("TV voting screen — photo reveal animation", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Voting Intro screen
+// ---------------------------------------------------------------------------
+
+describe("Voting Intro screen", () => {
+  function emitVotingIntro(round = 1) {
+    emit("game:state", {
+      state: "voting_intro",
+      round,
+      timer_end: Date.now() / 1000 + 5,
+      players: [],
+      prompts: [],
+      current_prompt: null,
+    });
+  }
+
+  it("renders 'Round 1' when state is voting_intro for round 1", () => {
+    renderTV();
+    act(() => emitVotingIntro(1));
+    expect(screen.getByText(/round 1/i)).toBeInTheDocument();
+  });
+
+  it("shows 'Let's Vote!' for round 1", () => {
+    renderTV();
+    act(() => emitVotingIntro(1));
+    expect(screen.getByText(/let's vote/i)).toBeInTheDocument();
+  });
+
+  it("shows 'Double Points!' for round 2", () => {
+    renderTV();
+    act(() => emitVotingIntro(2));
+    expect(screen.getByText(/double points/i)).toBeInTheDocument();
+  });
+
+});
+
+// ---------------------------------------------------------------------------
 // Round Intro screen
 // ---------------------------------------------------------------------------
 
@@ -664,12 +696,6 @@ describe("Round Intro screen", () => {
     expect(screen.getByText(/2,000 pts/i)).toBeInTheDocument();
   });
 
-  it("shows a timer", () => {
-    renderTV();
-    act(() => emitRoundIntro());
-    // TimerBar renders a countdown text (e.g. "7s")
-    expect(screen.getByText(/\ds$/)).toBeInTheDocument();
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -773,11 +799,6 @@ describe("Caption Intro screen", () => {
     expect(img).toHaveAttribute("src", "/uploads/ABCD/featured.jpg");
   });
 
-  it("renders a timer", () => {
-    renderTV();
-    act(() => emitCaptionIntro());
-    expect(screen.getByText(/\ds$/)).toBeInTheDocument();
-  });
 });
 
 // ---------------------------------------------------------------------------

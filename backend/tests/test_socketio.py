@@ -711,3 +711,157 @@ def test_submit_caption_vote_unknown_room_emits_error(client):
     client.emit("submit:caption_vote", {"room_code": "XXXX", "voted_for_id": "p1"})
     received = client.get_received()
     assert "error" in _received_names(received)
+
+
+# ---------------------------------------------------------------------------
+# "Player not found" error paths — sender not in room
+# ---------------------------------------------------------------------------
+
+def test_claim_host_player_not_in_room_emits_error(client):
+    """host:claim from a socket that never joined the room → 'Player not found'."""
+    code = room_store.create_room()["code"]
+    client.emit("host:claim", {"room_code": code})
+    received = client.get_received()
+    errors = [r for r in received if r["name"] == "error"]
+    assert errors
+    assert "not found" in errors[0]["args"][0]["message"].lower()
+
+
+def test_submit_photo_player_not_in_room_emits_error(client):
+    """submit:photo from a socket that never joined → 'Player not found'."""
+    code = room_store.create_room()["code"]
+    rooms[code]["state"] = "submitting"
+    client.emit("submit:photo", {"room_code": code, "prompt_id": "pid-1", "image_url": "/img.jpg"})
+    received = client.get_received()
+    errors = [r for r in received if r["name"] == "error"]
+    assert errors
+    assert "not found" in errors[0]["args"][0]["message"].lower()
+
+
+def test_submit_vote_player_not_in_room_emits_error(client):
+    """submit:vote from a socket that never joined → 'Player not found'."""
+    code = room_store.create_room()["code"]
+    rooms[code]["state"] = "voting"
+    client.emit("submit:vote", {"room_code": code, "prompt_id": "pid-1", "voted_for_id": "p1"})
+    received = client.get_received()
+    errors = [r for r in received if r["name"] == "error"]
+    assert errors
+    assert "not found" in errors[0]["args"][0]["message"].lower()
+
+
+def test_submit_caption_player_not_in_room_emits_error(client):
+    """submit:caption from a socket that never joined → 'Player not found'."""
+    code = room_store.create_room()["code"]
+    rooms[code]["state"] = "captioning"
+    client.emit("submit:caption", {"room_code": code, "caption_text": "hi"})
+    received = client.get_received()
+    errors = [r for r in received if r["name"] == "error"]
+    assert errors
+    assert "not found" in errors[0]["args"][0]["message"].lower()
+
+
+def test_submit_caption_vote_player_not_in_room_emits_error(client):
+    """submit:caption_vote from a socket that never joined → 'Player not found'."""
+    code = room_store.create_room()["code"]
+    rooms[code]["state"] = "caption_voting"
+    client.emit("submit:caption_vote", {"room_code": code, "voted_for_id": "p1"})
+    received = client.get_received()
+    errors = [r for r in received if r["name"] == "error"]
+    assert errors
+    assert "not found" in errors[0]["args"][0]["message"].lower()
+
+
+# ---------------------------------------------------------------------------
+# add_player returns None (race condition)
+# ---------------------------------------------------------------------------
+
+def test_join_add_player_fails_emits_error(client):
+    """If add_player returns None (room vanished after get_room check), emit error."""
+    code = room_store.create_room()["code"]
+    with patch("app.room_store.add_player", return_value=None):
+        client.emit("player:join", {"room_code": code, "name": "Alice", "role": "player"})
+        received = client.get_received()
+    assert "error" in _received_names(received)
+
+
+# ---------------------------------------------------------------------------
+# add_caption / add_caption_vote failure paths
+# ---------------------------------------------------------------------------
+
+def test_submit_caption_add_caption_fails_emits_error(client):
+    """When add_caption returns False, the handler should emit an error."""
+    code = room_store.create_room()["code"]
+    client.emit("player:join", {"room_code": code, "name": "Alice", "role": "player"})
+    received = client.get_received()
+    player_id = next(r["args"][0]["player_id"] for r in received if r["name"] == "player:self")
+    _setup_room_in_captioning(code, player_id)
+    with patch("app.room_store.add_caption", return_value=False):
+        client.emit("submit:caption", {"room_code": code, "caption_text": "My caption"})
+        received = client.get_received()
+    assert "error" in _received_names(received)
+
+
+def test_submit_caption_vote_add_fails_emits_error(client):
+    """When add_caption_vote returns False, the handler should emit an error."""
+    code = room_store.create_room()["code"]
+    client.emit("player:join", {"room_code": code, "name": "Alice", "role": "player"})
+    received = client.get_received()
+    voter_id = next(r["args"][0]["player_id"] for r in received if r["name"] == "player:self")
+    candidate_id = "other-player"
+    _add_player_direct(code, candidate_id, "Bob")
+    _setup_room_in_caption_voting(code, voter_id, candidate_id)
+    with patch("app.room_store.add_caption_vote", return_value=False):
+        client.emit("submit:caption_vote", {"room_code": code, "voted_for_id": candidate_id})
+        received = client.get_received()
+    assert "error" in _received_names(received)
+
+
+# ---------------------------------------------------------------------------
+# Early advance — all photos submitted / all votes cast
+# ---------------------------------------------------------------------------
+
+def test_submit_photo_advances_early_when_all_submitted(client):
+    """When Alice's photo completes all submissions, the state advances immediately."""
+    code = room_store.create_room()["code"]
+    client.emit("player:join", {"room_code": code, "name": "Alice", "role": "player"})
+    received = client.get_received()
+    player_id = next(r["args"][0]["player_id"] for r in received if r["name"] == "player:self")
+    other_id = "p_other"
+    _add_player_direct(code, other_id, "Bob")
+    _setup_room_in_submitting(code, player_id, other_id)
+    # Pre-populate the other player's submission so Alice's is the last one.
+    rooms[code]["prompts"][0]["submissions"][other_id] = {"image_url": "/img.jpg", "caption": None}
+    rooms[code]["timer_greenlet"] = MagicMock(dead=False)
+    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+        client.emit("submit:photo", {
+            "room_code": code, "prompt_id": "pid-1", "image_url": "/img2.jpg",
+        })
+        client.get_received()
+    assert rooms[code]["state"] == "voting_intro"
+
+
+def test_submit_vote_advances_early_when_all_voted(client):
+    """When Alice is the sole eligible voter and votes, the state advances immediately."""
+    code = room_store.create_room()["code"]
+    client.emit("player:join", {"room_code": code, "name": "Alice", "role": "player"})
+    received = client.get_received()
+    voter_id = next(r["args"][0]["player_id"] for r in received if r["name"] == "player:self")
+    # Set up voting state — Alice is NOT a competing player; no extra voters added.
+    rooms[code]["state"] = "voting"
+    rooms[code]["prompts"] = [{
+        "prompt_id":   "pid-1",
+        "prompt_text": "test prompt",
+        "player_ids":  ["p1", "p2"],
+        "submissions": {},
+        "votes":       {},
+    }]
+    rooms[code]["current_prompt_idx"] = 0
+    for pid, name in [("p1", "CompeteA"), ("p2", "CompeteB")]:
+        _add_player_direct(code, pid, name)
+    rooms[code]["timer_greenlet"] = MagicMock(dead=False)
+    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+        client.emit("submit:vote", {
+            "room_code": code, "prompt_id": "pid-1", "voted_for_id": "p1",
+        })
+        client.get_received()
+    assert rooms[code]["state"] == "scores"

@@ -657,3 +657,12 @@ def test_add_caption_vote_fails_wrong_state():
 
 def test_add_caption_vote_fails_unknown_room():
     assert room_store.add_caption_vote("XXXX", "p1", "p2") is False
+
+
+def test_add_caption_vote_fails_when_caption_prompt_is_none():
+    """Defensive: caption_voting state but caption_prompt is None → False."""
+    room = room_store.create_room()
+    code = room["code"]
+    rooms[code]["state"] = "caption_voting"
+    rooms[code]["caption_prompt"] = None
+    assert room_store.add_caption_vote(code, "p1", "p2") is False
