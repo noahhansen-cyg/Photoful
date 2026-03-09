@@ -1090,6 +1090,34 @@ def test_all_captions_submitted_returns_true_when_no_eligible_players():
     assert game.all_captions_submitted(cp, [tv]) is True
 
 
+def test_all_captions_submitted_ignores_connected_players_not_in_player_ids():
+    """A late-joining connected player not in player_ids must not block early advance."""
+    cp = {
+        "player_ids":  ["p1", "p2"],
+        "submissions": {"p1": {"caption": "a"}, "p2": {"caption": "b"}},
+    }
+    players = [
+        {"id": "p1", "role": "player", "is_connected": True},
+        {"id": "p2", "role": "player", "is_connected": True},
+        {"id": "p3", "role": "player", "is_connected": True},  # late joiner
+    ]
+    assert game.all_captions_submitted(cp, players) is True
+
+
+def test_all_captions_submitted_false_when_assigned_player_has_not_submitted():
+    """Even with a late joiner present, an assigned player missing submission → False."""
+    cp = {
+        "player_ids":  ["p1", "p2"],
+        "submissions": {"p1": {"caption": "a"}},  # p2 missing
+    }
+    players = [
+        {"id": "p1", "role": "player", "is_connected": True},
+        {"id": "p2", "role": "player", "is_connected": True},
+        {"id": "p3", "role": "player", "is_connected": True},  # late joiner
+    ]
+    assert game.all_captions_submitted(cp, players) is False
+
+
 # ---------------------------------------------------------------------------
 # all_voted — caption round, no eligible players
 # ---------------------------------------------------------------------------

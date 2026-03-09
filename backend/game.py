@@ -154,8 +154,10 @@ def all_prompts_submitted(prompts):
 
 
 def all_captions_submitted(caption_prompt, connected_players):
-    """True when all connected player/host roles have submitted a caption."""
-    eligible = [p for p in connected_players if p["role"] in ("player", "host")]
+    """True when all connected player/host roles assigned to this prompt have submitted."""
+    assigned = set(caption_prompt["player_ids"])
+    eligible = [p for p in connected_players
+                if p["role"] in ("player", "host") and p["id"] in assigned]
     if not eligible:
         return True
     return all(p["id"] in caption_prompt["submissions"] for p in eligible)

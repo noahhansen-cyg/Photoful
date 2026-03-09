@@ -1,7 +1,7 @@
 # TODO
 - [x] Allow host to extend timer during submission (button)
 - [x] Fix photo crop on final challenge (last photo)
-- [ ] Fix prompt submit button bug 4/4 when not everyone submitted
+- [x] On final round when everyone has submitted, it doesn't end submission period immediately.
 - [ ] Some pictures were showing as waiting... most likely a bug in the upload logic.
 - [ ] Casting from laptop, had to scoll a bunch, make everything fit on the screen better
 - [ ] if people close out of safari or go to a different app they disappear from the game until they re open the web app. Make names persist unless someone specifically closes out of the webapp or leave the lobby

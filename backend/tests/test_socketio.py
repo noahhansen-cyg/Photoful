@@ -635,6 +635,89 @@ def test_submit_caption_advances_early_when_all_submitted(client):
     assert rooms[code]["state"] == "caption_voting"
 
 
+def test_submit_caption_advances_early_when_last_of_multiple_players_submits(client):
+    """Alice's submission is the last — with Bob pre-submitted, state advances immediately."""
+    code = room_store.create_room()["code"]
+    client.emit("player:join", {"room_code": code, "name": "Alice", "role": "player"})
+    received = client.get_received()
+    alice_id = next(r["args"][0]["player_id"] for r in received if r["name"] == "player:self")
+    bob_id = "bob-player"
+    _add_player_direct(code, bob_id, "Bob")
+    # Caption prompt with both Alice and Bob assigned
+    rooms[code]["state"] = "captioning"
+    rooms[code]["caption_prompt"] = {
+        "prompt_id":            "cp-1",
+        "round_type":           "caption",
+        "featured_image_url":   "/img.jpg",
+        "featured_player_id":   bob_id,
+        "featured_prompt_text": "A prompt",
+        "player_ids":           [alice_id, bob_id],
+        "submissions":          {bob_id: {"caption": "Bob's caption"}},  # Bob pre-submitted
+        "votes":                {},
+        "score_deltas":         {},
+    }
+    rooms[code]["timer_greenlet"] = MagicMock(dead=False)
+    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+        client.emit("submit:caption", {"room_code": code, "caption_text": "Alice's caption"})
+        client.get_received()
+    assert rooms[code]["state"] == "caption_voting"
+
+
+def test_submit_caption_does_not_advance_early_when_not_all_submitted(client):
+    """With Bob still pending, Alice submitting alone must NOT advance the state."""
+    code = room_store.create_room()["code"]
+    client.emit("player:join", {"room_code": code, "name": "Alice", "role": "player"})
+    received = client.get_received()
+    alice_id = next(r["args"][0]["player_id"] for r in received if r["name"] == "player:self")
+    bob_id = "bob-player"
+    _add_player_direct(code, bob_id, "Bob")
+    rooms[code]["state"] = "captioning"
+    rooms[code]["caption_prompt"] = {
+        "prompt_id":            "cp-1",
+        "round_type":           "caption",
+        "featured_image_url":   "/img.jpg",
+        "featured_player_id":   bob_id,
+        "featured_prompt_text": "A prompt",
+        "player_ids":           [alice_id, bob_id],
+        "submissions":          {},  # nobody submitted yet
+        "votes":                {},
+        "score_deltas":         {},
+    }
+    client.emit("submit:caption", {"room_code": code, "caption_text": "Alice's caption"})
+    client.get_received()
+    assert rooms[code]["state"] == "captioning"  # must still be waiting
+
+
+def test_submit_caption_late_joiner_does_not_block_early_advance(client):
+    """A player who joined after caption prompt was created must not block early advance."""
+    code = room_store.create_room()["code"]
+    client.emit("player:join", {"room_code": code, "name": "Alice", "role": "player"})
+    received = client.get_received()
+    alice_id = next(r["args"][0]["player_id"] for r in received if r["name"] == "player:self")
+    bob_id = "bob-player"
+    _add_player_direct(code, bob_id, "Bob")
+    late_id = "late-joiner"
+    _add_player_direct(code, late_id, "Late")
+    # Caption prompt has only Alice and Bob (Late joined after creation)
+    rooms[code]["state"] = "captioning"
+    rooms[code]["caption_prompt"] = {
+        "prompt_id":            "cp-1",
+        "round_type":           "caption",
+        "featured_image_url":   "/img.jpg",
+        "featured_player_id":   bob_id,
+        "featured_prompt_text": "A prompt",
+        "player_ids":           [alice_id, bob_id],  # Late NOT in here
+        "submissions":          {bob_id: {"caption": "Bob's caption"}},
+        "votes":                {},
+        "score_deltas":         {},
+    }
+    rooms[code]["timer_greenlet"] = MagicMock(dead=False)
+    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+        client.emit("submit:caption", {"room_code": code, "caption_text": "Alice's caption"})
+        client.get_received()
+    assert rooms[code]["state"] == "caption_voting"
+
+
 def test_submit_caption_unknown_room_emits_error(client):
     client.emit("submit:caption", {"room_code": "XXXX", "caption_text": "text"})
     received = client.get_received()
