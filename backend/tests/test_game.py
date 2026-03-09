@@ -1132,3 +1132,65 @@ def test_start_timer_clears_greenlet_ref_on_room():
     gl = game._start_timer(code, 0.01, lambda: None, MagicMock())
     gl.join(timeout=2.0)
     assert rooms[code]["timer_greenlet"] is None
+
+
+# ---------------------------------------------------------------------------
+# extend_timer
+# ---------------------------------------------------------------------------
+
+def test_extend_timer_returns_false_for_unknown_room():
+    mock_io = _mock_socketio()
+    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+        assert game.extend_timer("ZZZZ", mock_io) is False
+
+
+def test_extend_timer_returns_false_for_non_submitting_state():
+    code, _ = _room_with_n_players(2)
+    rooms[code]["state"] = "voting"
+    mock_io = _mock_socketio()
+    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+        assert game.extend_timer(code, mock_io) is False
+
+
+def test_extend_timer_returns_true_for_submitting_room():
+    code, _ = _room_in_submitting()
+    mock_io = _mock_socketio()
+    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+        assert game.extend_timer(code, mock_io) is True
+
+
+def test_extend_timer_extends_timer_end_by_extend_amount():
+    import time as _time
+    code, _ = _room_in_submitting()
+    original_end = _time.time() + 60
+    rooms[code]["timer_end"] = original_end
+    mock_io = _mock_socketio()
+    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+        game.extend_timer(code, mock_io)
+    # new_end ≈ original_end + EXTEND_AMOUNT (within 0.5s of execution time)
+    delta = rooms[code]["timer_end"] - original_end
+    assert abs(delta - game.EXTEND_AMOUNT) < 0.5
+
+
+def test_extend_timer_replaces_timer_greenlet():
+    code, _ = _room_in_submitting()
+    old_gl = MagicMock(dead=False)
+    rooms[code]["timer_greenlet"] = old_gl
+    mock_io = _mock_socketio()
+    new_gl = MagicMock(dead=False)
+    with patch("game._start_timer", return_value=new_gl):
+        game.extend_timer(code, mock_io)
+    old_gl.kill.assert_called_once()
+    assert rooms[code]["timer_greenlet"] is new_gl
+
+
+def test_extend_timer_broadcasts_game_state():
+    code, _ = _room_in_submitting()
+    mock_io = _mock_socketio()
+    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+        game.extend_timer(code, mock_io)
+    mock_io.emit.assert_called_once_with("game:state", mock_io.emit.call_args[0][1], to=code)
+
+
+def test_extend_amount_constant_is_positive():
+    assert game.EXTEND_AMOUNT > 0

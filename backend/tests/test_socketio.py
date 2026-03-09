@@ -865,3 +865,73 @@ def test_submit_vote_advances_early_when_all_voted(client):
         })
         client.get_received()
     assert rooms[code]["state"] == "scores"
+
+
+# ---------------------------------------------------------------------------
+# host:extend_timer
+# ---------------------------------------------------------------------------
+
+def test_extend_timer_host_extends_successfully(client):
+    """Host can extend the submission timer."""
+    code = room_store.create_room()["code"]
+    _join_and_become_host(client, code)
+    _setup_room_in_submitting(code, "some-player")
+    rooms[code]["timer_greenlet"] = MagicMock(dead=False)
+    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+        client.emit("host:extend_timer", {"room_code": code})
+        received = client.get_received()
+    assert "game:state" in _received_names(received)
+    assert rooms[code]["state"] == "submitting"
+
+
+def test_extend_timer_broadcasts_updated_timer_end(client):
+    """Extending the timer updates timer_end on the room."""
+    import time
+    code = room_store.create_room()["code"]
+    _join_and_become_host(client, code)
+    _setup_room_in_submitting(code, "some-player")
+    rooms[code]["timer_end"] = time.time() + 10
+    rooms[code]["timer_greenlet"] = MagicMock(dead=False)
+    before = time.time()
+    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+        client.emit("host:extend_timer", {"room_code": code})
+        client.get_received()
+    # timer_end should have grown by approximately EXTEND_AMOUNT
+    import game as game_module
+    assert rooms[code]["timer_end"] >= before + game_module.EXTEND_AMOUNT
+
+
+def test_extend_timer_non_host_emits_error(client):
+    """A plain player cannot extend the timer."""
+    code = room_store.create_room()["code"]
+    client.emit("player:join", {"room_code": code, "name": "Alice", "role": "player"})
+    client.get_received()
+    _setup_room_in_submitting(code, "some-player")
+    client.emit("host:extend_timer", {"room_code": code})
+    received = client.get_received()
+    assert "error" in _received_names(received)
+
+
+def test_extend_timer_unknown_room_emits_error(client):
+    client.emit("host:extend_timer", {"room_code": "XXXX"})
+    received = client.get_received()
+    assert "error" in _received_names(received)
+
+
+def test_extend_timer_wrong_state_emits_error(client):
+    """Cannot extend timer if the room is not in submitting state."""
+    code = room_store.create_room()["code"]
+    _join_and_become_host(client, code)
+    rooms[code]["state"] = "voting"
+    client.emit("host:extend_timer", {"room_code": code})
+    received = client.get_received()
+    assert "error" in _received_names(received)
+
+
+def test_extend_timer_player_not_in_room_emits_error(client):
+    """Socket that never joined a room cannot extend the timer."""
+    code = room_store.create_room()["code"]
+    rooms[code]["state"] = "submitting"
+    client.emit("host:extend_timer", {"room_code": code})
+    received = client.get_received()
+    assert "error" in _received_names(received)

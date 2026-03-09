@@ -424,6 +424,29 @@ def handle_restart(data):
     socketio.emit("game:state", room_store.get_room_state(code), to=code)
 
 
+@socketio.on("host:extend_timer")
+def handle_extend_timer(data):
+    code = data.get("room_code", "").upper()
+    sid  = request.sid[:8]
+
+    room = room_store.get_room(code)
+    if not room:
+        emit("error", {"message": "Room not found"})
+        return
+
+    sender = next((p for p in room["players"] if p["socket_id"] == request.sid), None)
+    if not sender or sender["role"] != "host":
+        emit("error", {"message": "Only the host can extend the timer"})
+        return
+
+    success = game.extend_timer(code, socketio)
+    if not success:
+        emit("error", {"message": "Cannot extend timer right now"})
+        return
+
+    log.info("room=%-4s event=host:extend_timer host=%s sid=%s", code, sender["name"], sid)
+
+
 @socketio.on("disconnect")
 def handle_disconnect():
     sid  = request.sid[:8]

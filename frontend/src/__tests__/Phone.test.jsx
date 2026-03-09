@@ -512,6 +512,63 @@ describe("Phone submitting screen — non-assigned player", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Submitting screen — host extend timer button
+// ---------------------------------------------------------------------------
+
+describe("Phone submitting screen — host extend timer", () => {
+  const submittingState = {
+    state: "submitting",
+    prompts: [{
+      prompt_id:   "pid-1",
+      prompt_text: "Show us your pet",
+      player_ids:  ["p1", "p2"],
+      submissions: {},
+      votes:       {},
+    }],
+    players: [
+      { id: "p1", name: "Alice", role: "host",   avatar_color: "#FF6B6B" },
+      { id: "p2", name: "Bob",   role: "player", avatar_color: "#4ECDC4" },
+    ],
+  };
+
+  async function joinAsHostAndEmitSubmitting() {
+    renderPhone("ABCD");
+    await userEvent.type(screen.getByPlaceholderText(/your name/i), "Alice");
+    await userEvent.click(screen.getByRole("button", { name: /join game/i }));
+    act(() => {
+      emit("player:self", { player_id: "p1", role: "host" });
+      emit("game:state", submittingState);
+    });
+  }
+
+  async function joinAsPlayerAndEmitSubmitting() {
+    renderPhone("ABCD");
+    await userEvent.type(screen.getByPlaceholderText(/your name/i), "Bob");
+    await userEvent.click(screen.getByRole("button", { name: /join game/i }));
+    act(() => {
+      emit("player:self", { player_id: "p2", role: "player" });
+      emit("game:state", submittingState);
+    });
+  }
+
+  it("shows the Extend Timer button for the host during submitting", async () => {
+    await joinAsHostAndEmitSubmitting();
+    expect(screen.getByRole("button", { name: /extend timer/i })).toBeInTheDocument();
+  });
+
+  it("does not show the Extend Timer button for a regular player", async () => {
+    await joinAsPlayerAndEmitSubmitting();
+    expect(screen.queryByRole("button", { name: /extend timer/i })).not.toBeInTheDocument();
+  });
+
+  it("emits host:extend_timer when the host clicks Extend Timer", async () => {
+    await joinAsHostAndEmitSubmitting();
+    await userEvent.click(screen.getByRole("button", { name: /extend timer/i }));
+    expect(mockSocket.emit).toHaveBeenCalledWith("host:extend_timer", { room_code: "ABCD" });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Submitting screen — assigned player
 // ---------------------------------------------------------------------------
 
