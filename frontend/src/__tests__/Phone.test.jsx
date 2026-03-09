@@ -1221,3 +1221,45 @@ describe("Phone caption round screens", () => {
     expect(screen.getByText(/waiting for others/i)).toBeInTheDocument();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Photo display — no cropping (objectFit: contain)
+// ---------------------------------------------------------------------------
+
+describe("Phone photo display — no cropping", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("vote card images use objectFit contain (no cropping)", async () => {
+    renderPhone("ABCD");
+    await userEvent.type(screen.getByPlaceholderText(/your name/i), "Carol");
+    await userEvent.click(screen.getByRole("button", { name: /join game/i }));
+    act(() => { emit("player:self", { player_id: "p3", role: "player" }); });
+    vi.useFakeTimers();
+    act(() => {
+      emit("game:state", {
+        state: "voting",
+        current_prompt: {
+          prompt_id:   "pid-1",
+          player_ids:  ["p1", "p2"],
+          submissions: {
+            "p1": { image_url: "/alice.jpg", caption: null },
+            "p2": { image_url: "/bob.jpg",   caption: null },
+          },
+          votes: {},
+          prompt_text: "Best photo?",
+        },
+        players: [
+          { id: "p1", name: "Alice", role: "player", avatar_color: "#FF6B6B" },
+          { id: "p2", name: "Bob",   role: "player", avatar_color: "#4ECDC4" },
+        ],
+      });
+    });
+    act(() => { vi.advanceTimersByTime(3500); });
+    vi.useRealTimers();
+    const imgs = screen.getAllByRole("img");
+    expect(imgs.length).toBeGreaterThan(0);
+    imgs.forEach(img => expect(img.style.objectFit).toBe("contain"));
+  });
+});

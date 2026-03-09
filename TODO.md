@@ -1,6 +1,6 @@
 # TODO
 - [x] Allow host to extend timer during submission (button)
-- [ ] Fix photo crop on final challenge (last photo)
+- [x] Fix photo crop on final challenge (last photo)
 - [ ] Fix prompt submit button bug 4/4 when not everyone submitted
 - [ ] Some pictures were showing as waiting... most likely a bug in the upload logic.
 - [ ] Casting from laptop, had to scoll a bunch, make everything fit on the screen better

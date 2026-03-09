@@ -531,7 +531,7 @@ const styles = {
   scorePhotoCard: (winner) => ({ display: "flex", flexDirection: "column", alignItems: "center", gap: "0.75rem", maxWidth: "340px", outline: winner ? "4px solid #4ecdc4" : "none", borderRadius: 14, padding: winner ? "0.5rem" : 0 }),
   roundPoints:    { fontSize: "1.8rem", fontWeight: "bold", color: "#4ecdc4", margin: 0 },
   inlineDelta:    { color: "#4ecdc4", fontWeight: "bold" },
-  photo:       { width: "100%", maxWidth: "340px", maxHeight: "360px", objectFit: "cover", borderRadius: 12, border: "3px solid #2d2d44" },
+  photo:       { width: "100%", maxWidth: "340px", maxHeight: "360px", objectFit: "contain", borderRadius: 12, border: "3px solid #2d2d44" },
   photoPlaceholder: { width: 300, height: 300, background: "#1a1a2e", borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center", color: "#555" },
   photoName: (color) => ({ fontSize: "1.3rem", fontWeight: "bold", color: color ?? "#fff" }),
   caption:     { fontSize: "1rem", color: "#ccc", fontStyle: "italic", textAlign: "center" },
@@ -561,7 +561,7 @@ const styles = {
   roundIntroBadge: { fontSize: "3rem", fontWeight: "bold", color: "#6c63ff" },
   roundBadge: { background: "#6c63ff22", border: "1px solid #6c63ff", borderRadius: 999, padding: "0.3rem 0.9rem", fontSize: "0.85rem", color: "#6c63ff" },
 
-  featuredPhoto: { maxWidth: "480px", width: "100%", maxHeight: "320px", objectFit: "cover", borderRadius: 14, border: "3px solid #4ecdc4" },
+  featuredPhoto: { maxWidth: "480px", width: "100%", maxHeight: "320px", objectFit: "contain", borderRadius: 14, border: "3px solid #4ecdc4" },
   captionGrid:   { display: "flex", flexWrap: "wrap", gap: "1.5rem", justifyContent: "center", maxWidth: "900px" },
   captionCard:   { background: "#1a1a2e", borderRadius: 12, padding: "1.25rem 1.5rem", maxWidth: "280px", minWidth: "200px", display: "flex", flexDirection: "column", gap: "0.6rem", textAlign: "center" },
   captionText:   { fontSize: "1.2rem", color: "#fff", fontStyle: "italic", lineHeight: 1.4 },

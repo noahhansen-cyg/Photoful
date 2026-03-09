@@ -950,3 +950,112 @@ describe("Caption Scores screen", () => {
     expect(screen.getByTestId("caption-score-delta")).toBeInTheDocument();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Photo display — no cropping (objectFit: contain)
+// ---------------------------------------------------------------------------
+
+describe("TV photo display — no cropping", () => {
+  const players = [
+    { id: "1", name: "Alice", role: "player", avatar_color: "#FF6B6B" },
+    { id: "2", name: "Bob",   role: "player", avatar_color: "#4ECDC4" },
+  ];
+  const captionPrompt = {
+    prompt_id:            "cp-1",
+    round_type:           "caption",
+    featured_image_url:   "/uploads/ABCD/featured.jpg",
+    featured_player_id:   "1",
+    featured_prompt_text: "Funniest pet photo",
+    player_ids:           ["1", "2"],
+    submissions:          {},
+    votes:                {},
+    score_deltas:         {},
+  };
+
+  it("voting screen photos use objectFit contain (no cropping)", () => {
+    renderTV();
+    act(() => emit("game:state", {
+      state: "voting", round: 1,
+      current_prompt: {
+        prompt_id:   "pid-1",
+        player_ids:  ["1", "2"],
+        submissions: {
+          "1": { image_url: "/alice.jpg", caption: null },
+          "2": { image_url: "/bob.jpg",   caption: null },
+        },
+        votes: {},
+        prompt_text: "Best photo?",
+      },
+      prompts: [], players,
+    }));
+    const imgs = screen.getAllByRole("img");
+    expect(imgs.length).toBeGreaterThan(0);
+    imgs.forEach(img => expect(img.style.objectFit).toBe("contain"));
+  });
+
+  it("scores screen photos use objectFit contain (no cropping)", () => {
+    renderTV();
+    act(() => emit("game:state", {
+      state: "scores", round: 1,
+      current_prompt: {
+        prompt_id:   "pid-1",
+        player_ids:  ["1", "2"],
+        submissions: {
+          "1": { image_url: "/alice.jpg", caption: null },
+          "2": { image_url: "/bob.jpg",   caption: null },
+        },
+        votes: { "3": "1" },
+        score_deltas: { "1": 1000, "2": 0 },
+        prompt_text: "Best photo?",
+      },
+      prompts: [], players,
+    }));
+    const imgs = screen.getAllByRole("img");
+    expect(imgs.length).toBeGreaterThan(0);
+    imgs.forEach(img => expect(img.style.objectFit).toBe("contain"));
+  });
+
+  it("caption intro featured photo uses objectFit contain (no cropping)", () => {
+    renderTV();
+    act(() => emit("game:state", {
+      state: "caption_intro", round: 2,
+      caption_prompt: captionPrompt,
+      players, prompts: [], current_prompt: null,
+    }));
+    const img = screen.getByRole("img", { name: /featured/i });
+    expect(img.style.objectFit).toBe("contain");
+  });
+
+  it("captioning featured photo uses objectFit contain (no cropping)", () => {
+    renderTV();
+    act(() => emit("game:state", {
+      state: "captioning", round: 2,
+      caption_prompt: captionPrompt,
+      players, prompts: [], current_prompt: null, timer_end: null,
+    }));
+    const img = screen.getByRole("img", { name: /featured/i });
+    expect(img.style.objectFit).toBe("contain");
+  });
+
+  it("caption voting featured photo uses objectFit contain (no cropping)", () => {
+    renderTV();
+    act(() => emit("game:state", {
+      state: "caption_voting", round: 2,
+      caption_prompt: captionPrompt,
+      players, prompts: [], current_prompt: null, timer_end: null,
+    }));
+    const img = screen.getByRole("img", { name: /featured/i });
+    expect(img.style.objectFit).toBe("contain");
+  });
+
+  it("caption scores featured photo uses objectFit contain (no cropping)", () => {
+    renderTV();
+    act(() => emit("game:state", {
+      state: "caption_scores", round: 2,
+      caption_prompt: captionPrompt,
+      players, prompts: [], current_prompt: null,
+    }));
+    const img = screen.getByRole("img", { name: /featured/i });
+    expect(img.style.objectFit).toBe("contain");
+  });
+});

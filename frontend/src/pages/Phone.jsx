@@ -759,7 +759,7 @@ const styles = {
 
   voteOptions: { display: "flex", flexDirection: "column", gap: "1rem", width: "100%" },
   voteCard:    { background: "#1a1a2e", border: "2px solid #2d2d44", borderRadius: 12, padding: "0.75rem", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: "0.5rem", width: "100%", boxSizing: "border-box" },
-  voteImg:     { width: "100%", maxHeight: "220px", objectFit: "cover", borderRadius: 8 },
+  voteImg:     { width: "100%", maxHeight: "220px", objectFit: "contain", borderRadius: 8 },
   voteImgPlaceholder: { width: "100%", height: 120, background: "#2d2d44", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", color: "#555" },
   voteName: (color) => ({ fontWeight: "bold", color: color ?? "#fff", fontSize: "1.1rem" }),
   caption:     { fontSize: "0.85rem", color: "#aaa", fontStyle: "italic" },
