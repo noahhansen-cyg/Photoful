@@ -128,7 +128,7 @@ def upload_photo(code):
     room = room_store.get_room(code)
     if not room:
         return jsonify({"error": "Room not found"}), 404
-    if room["state"] != "submitting":
+    if room["state"] not in ("submitting", "voting_intro"):
         return jsonify({"error": "Not in submission phase"}), 400
     if "photo" not in request.files:
         return jsonify({"error": "No photo in request"}), 400

@@ -152,6 +152,33 @@ def test_upload_returns_400_when_not_submitting(client):
     assert response.status_code == 400
 
 
+def test_upload_accepted_during_voting_intro_grace_window(client):
+    """A slow upload that completes just after the timer fires must still be saved."""
+    code = _room_in_submitting(client)
+    rooms[code]["state"] = "voting_intro"
+    buf = _jpeg_bytes()
+    response = client.post(
+        f"/api/rooms/{code}/upload",
+        data={"photo": (buf, "photo.jpg")},
+        content_type="multipart/form-data",
+    )
+    assert response.status_code == 201
+    assert "image_url" in response.get_json()
+
+
+def test_upload_returns_400_after_voting_intro(client):
+    """Once voting has started the upload window is closed."""
+    code = _room_in_submitting(client)
+    rooms[code]["state"] = "voting"
+    buf = _jpeg_bytes()
+    response = client.post(
+        f"/api/rooms/{code}/upload",
+        data={"photo": (buf, "photo.jpg")},
+        content_type="multipart/form-data",
+    )
+    assert response.status_code == 400
+
+
 def test_upload_returns_400_when_no_photo_field(client):
     code = _room_in_submitting(client)
     response = client.post(

@@ -903,6 +903,50 @@ def test_submit_caption_vote_add_fails_emits_error(client):
 # Early advance — all photos submitted / all votes cast
 # ---------------------------------------------------------------------------
 
+def test_submit_photo_accepted_during_voting_intro_grace_window(client):
+    """A submit:photo that arrives just after the timer fires (state=voting_intro)
+    must still be recorded and the photo must appear during voting."""
+    code = room_store.create_room()["code"]
+    client.emit("player:join", {"room_code": code, "name": "Alice", "role": "player"})
+    received = client.get_received()
+    player_id = next(r["args"][0]["player_id"] for r in received if r["name"] == "player:self")
+    other_id = "p_other"
+    _add_player_direct(code, other_id, "Bob")
+    _setup_room_in_submitting(code, player_id, other_id)
+    # Simulate: timer fired, state advanced to voting_intro before Alice's upload finished
+    rooms[code]["state"] = "voting_intro"
+    rooms[code]["timer_greenlet"] = MagicMock(dead=False)
+    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+        client.emit("submit:photo", {
+            "room_code": code, "prompt_id": "pid-1", "image_url": "/late.jpg",
+        })
+        client.get_received()
+    # Submission must be recorded despite the late arrival
+    assert rooms[code]["prompts"][0]["submissions"][player_id]["image_url"] == "/late.jpg"
+
+
+def test_submit_photo_during_voting_intro_advances_to_voting_when_all_done(client):
+    """If the late submit completes all submissions, it should skip the rest of
+    voting_intro and jump straight to voting."""
+    code = room_store.create_room()["code"]
+    client.emit("player:join", {"room_code": code, "name": "Alice", "role": "player"})
+    received = client.get_received()
+    player_id = next(r["args"][0]["player_id"] for r in received if r["name"] == "player:self")
+    other_id = "p_other"
+    _add_player_direct(code, other_id, "Bob")
+    _setup_room_in_submitting(code, player_id, other_id)
+    # Bob already submitted; Alice's is the last one but arrives during voting_intro
+    rooms[code]["prompts"][0]["submissions"][other_id] = {"image_url": "/bob.jpg", "caption": None}
+    rooms[code]["state"] = "voting_intro"
+    rooms[code]["timer_greenlet"] = MagicMock(dead=False)
+    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+        client.emit("submit:photo", {
+            "room_code": code, "prompt_id": "pid-1", "image_url": "/late.jpg",
+        })
+        client.get_received()
+    assert rooms[code]["state"] == "voting"
+
+
 def test_submit_photo_advances_early_when_all_submitted(client):
     """When Alice's photo completes all submissions, the state advances immediately."""
     code = room_store.create_room()["code"]
