@@ -65,9 +65,13 @@ def remove_player(socket_id):
 
 
 def add_submission(code, prompt_id, player_id, image_url, caption=None):
-    """Record a photo submission. Returns True on success, False if invalid."""
+    """Record a photo submission. Returns True on success, False if invalid.
+
+    Also accepts submissions during 'voting_intro' to handle the race where a
+    slow upload completes just after the submission timer fires.
+    """
     room = rooms.get(code)
-    if not room or room["state"] != "submitting":
+    if not room or room["state"] not in ("submitting", "voting_intro"):
         return False
     prompt = _find_prompt(room, prompt_id)
     if not prompt or player_id not in prompt["player_ids"]:

@@ -24,6 +24,7 @@ ROUND_INTRO_TIMEOUT   = 7   # seconds the "Round N!" screen is shown before next
 TOTAL_ROUNDS          = 2   # total number of photo voting rounds
 CAPTION_INTRO_TIMEOUT = 7   # seconds showing featured photo before captioning
 CAPTION_TIMEOUT       = 60  # seconds to submit text captions
+EXTEND_AMOUNT         = 30  # seconds added to the submission timer per host extension
 
 
 def load_prompts():
@@ -153,8 +154,10 @@ def all_prompts_submitted(prompts):
 
 
 def all_captions_submitted(caption_prompt, connected_players):
-    """True when all connected player/host roles have submitted a caption."""
-    eligible = [p for p in connected_players if p["role"] in ("player", "host")]
+    """True when all connected player/host roles assigned to this prompt have submitted."""
+    assigned = set(caption_prompt["player_ids"])
+    eligible = [p for p in connected_players
+                if p["role"] in ("player", "host") and p["id"] in assigned]
     if not eligible:
         return True
     return all(p["id"] in caption_prompt["submissions"] for p in eligible)
@@ -345,6 +348,25 @@ def start_game(room_code, socketio):
         room_code, SUBMIT_TIMEOUT, lambda: advance_state(room_code, socketio), socketio
     )
 
+    socketio.emit("game:state", room_store.get_room_state(room_code), to=room_code)
+    return True
+
+
+def extend_timer(room_code, socketio):
+    """
+    Add EXTEND_AMOUNT seconds to the running submission timer.
+    Only valid during the 'submitting' state.  Returns True on success.
+    """
+    room = room_store.get_room(room_code)
+    if not room or room["state"] != "submitting":
+        return False
+    cancel_timer(room)
+    remaining  = max(0.0, (room.get("timer_end") or 0.0) - time.time())
+    new_delay  = remaining + EXTEND_AMOUNT
+    room["timer_end"]       = time.time() + new_delay
+    room["timer_greenlet"]  = _start_timer(
+        room_code, new_delay, lambda: advance_state(room_code, socketio), socketio
+    )
     socketio.emit("game:state", room_store.get_room_state(room_code), to=room_code)
     return True
 

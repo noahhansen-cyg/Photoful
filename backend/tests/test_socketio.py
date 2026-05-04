@@ -635,6 +635,89 @@ def test_submit_caption_advances_early_when_all_submitted(client):
     assert rooms[code]["state"] == "caption_voting"
 
 
+def test_submit_caption_advances_early_when_last_of_multiple_players_submits(client):
+    """Alice's submission is the last — with Bob pre-submitted, state advances immediately."""
+    code = room_store.create_room()["code"]
+    client.emit("player:join", {"room_code": code, "name": "Alice", "role": "player"})
+    received = client.get_received()
+    alice_id = next(r["args"][0]["player_id"] for r in received if r["name"] == "player:self")
+    bob_id = "bob-player"
+    _add_player_direct(code, bob_id, "Bob")
+    # Caption prompt with both Alice and Bob assigned
+    rooms[code]["state"] = "captioning"
+    rooms[code]["caption_prompt"] = {
+        "prompt_id":            "cp-1",
+        "round_type":           "caption",
+        "featured_image_url":   "/img.jpg",
+        "featured_player_id":   bob_id,
+        "featured_prompt_text": "A prompt",
+        "player_ids":           [alice_id, bob_id],
+        "submissions":          {bob_id: {"caption": "Bob's caption"}},  # Bob pre-submitted
+        "votes":                {},
+        "score_deltas":         {},
+    }
+    rooms[code]["timer_greenlet"] = MagicMock(dead=False)
+    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+        client.emit("submit:caption", {"room_code": code, "caption_text": "Alice's caption"})
+        client.get_received()
+    assert rooms[code]["state"] == "caption_voting"
+
+
+def test_submit_caption_does_not_advance_early_when_not_all_submitted(client):
+    """With Bob still pending, Alice submitting alone must NOT advance the state."""
+    code = room_store.create_room()["code"]
+    client.emit("player:join", {"room_code": code, "name": "Alice", "role": "player"})
+    received = client.get_received()
+    alice_id = next(r["args"][0]["player_id"] for r in received if r["name"] == "player:self")
+    bob_id = "bob-player"
+    _add_player_direct(code, bob_id, "Bob")
+    rooms[code]["state"] = "captioning"
+    rooms[code]["caption_prompt"] = {
+        "prompt_id":            "cp-1",
+        "round_type":           "caption",
+        "featured_image_url":   "/img.jpg",
+        "featured_player_id":   bob_id,
+        "featured_prompt_text": "A prompt",
+        "player_ids":           [alice_id, bob_id],
+        "submissions":          {},  # nobody submitted yet
+        "votes":                {},
+        "score_deltas":         {},
+    }
+    client.emit("submit:caption", {"room_code": code, "caption_text": "Alice's caption"})
+    client.get_received()
+    assert rooms[code]["state"] == "captioning"  # must still be waiting
+
+
+def test_submit_caption_late_joiner_does_not_block_early_advance(client):
+    """A player who joined after caption prompt was created must not block early advance."""
+    code = room_store.create_room()["code"]
+    client.emit("player:join", {"room_code": code, "name": "Alice", "role": "player"})
+    received = client.get_received()
+    alice_id = next(r["args"][0]["player_id"] for r in received if r["name"] == "player:self")
+    bob_id = "bob-player"
+    _add_player_direct(code, bob_id, "Bob")
+    late_id = "late-joiner"
+    _add_player_direct(code, late_id, "Late")
+    # Caption prompt has only Alice and Bob (Late joined after creation)
+    rooms[code]["state"] = "captioning"
+    rooms[code]["caption_prompt"] = {
+        "prompt_id":            "cp-1",
+        "round_type":           "caption",
+        "featured_image_url":   "/img.jpg",
+        "featured_player_id":   bob_id,
+        "featured_prompt_text": "A prompt",
+        "player_ids":           [alice_id, bob_id],  # Late NOT in here
+        "submissions":          {bob_id: {"caption": "Bob's caption"}},
+        "votes":                {},
+        "score_deltas":         {},
+    }
+    rooms[code]["timer_greenlet"] = MagicMock(dead=False)
+    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+        client.emit("submit:caption", {"room_code": code, "caption_text": "Alice's caption"})
+        client.get_received()
+    assert rooms[code]["state"] == "caption_voting"
+
+
 def test_submit_caption_unknown_room_emits_error(client):
     client.emit("submit:caption", {"room_code": "XXXX", "caption_text": "text"})
     received = client.get_received()
@@ -820,6 +903,50 @@ def test_submit_caption_vote_add_fails_emits_error(client):
 # Early advance — all photos submitted / all votes cast
 # ---------------------------------------------------------------------------
 
+def test_submit_photo_accepted_during_voting_intro_grace_window(client):
+    """A submit:photo that arrives just after the timer fires (state=voting_intro)
+    must still be recorded and the photo must appear during voting."""
+    code = room_store.create_room()["code"]
+    client.emit("player:join", {"room_code": code, "name": "Alice", "role": "player"})
+    received = client.get_received()
+    player_id = next(r["args"][0]["player_id"] for r in received if r["name"] == "player:self")
+    other_id = "p_other"
+    _add_player_direct(code, other_id, "Bob")
+    _setup_room_in_submitting(code, player_id, other_id)
+    # Simulate: timer fired, state advanced to voting_intro before Alice's upload finished
+    rooms[code]["state"] = "voting_intro"
+    rooms[code]["timer_greenlet"] = MagicMock(dead=False)
+    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+        client.emit("submit:photo", {
+            "room_code": code, "prompt_id": "pid-1", "image_url": "/late.jpg",
+        })
+        client.get_received()
+    # Submission must be recorded despite the late arrival
+    assert rooms[code]["prompts"][0]["submissions"][player_id]["image_url"] == "/late.jpg"
+
+
+def test_submit_photo_during_voting_intro_advances_to_voting_when_all_done(client):
+    """If the late submit completes all submissions, it should skip the rest of
+    voting_intro and jump straight to voting."""
+    code = room_store.create_room()["code"]
+    client.emit("player:join", {"room_code": code, "name": "Alice", "role": "player"})
+    received = client.get_received()
+    player_id = next(r["args"][0]["player_id"] for r in received if r["name"] == "player:self")
+    other_id = "p_other"
+    _add_player_direct(code, other_id, "Bob")
+    _setup_room_in_submitting(code, player_id, other_id)
+    # Bob already submitted; Alice's is the last one but arrives during voting_intro
+    rooms[code]["prompts"][0]["submissions"][other_id] = {"image_url": "/bob.jpg", "caption": None}
+    rooms[code]["state"] = "voting_intro"
+    rooms[code]["timer_greenlet"] = MagicMock(dead=False)
+    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+        client.emit("submit:photo", {
+            "room_code": code, "prompt_id": "pid-1", "image_url": "/late.jpg",
+        })
+        client.get_received()
+    assert rooms[code]["state"] == "voting"
+
+
 def test_submit_photo_advances_early_when_all_submitted(client):
     """When Alice's photo completes all submissions, the state advances immediately."""
     code = room_store.create_room()["code"]
@@ -865,3 +992,73 @@ def test_submit_vote_advances_early_when_all_voted(client):
         })
         client.get_received()
     assert rooms[code]["state"] == "scores"
+
+
+# ---------------------------------------------------------------------------
+# host:extend_timer
+# ---------------------------------------------------------------------------
+
+def test_extend_timer_host_extends_successfully(client):
+    """Host can extend the submission timer."""
+    code = room_store.create_room()["code"]
+    _join_and_become_host(client, code)
+    _setup_room_in_submitting(code, "some-player")
+    rooms[code]["timer_greenlet"] = MagicMock(dead=False)
+    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+        client.emit("host:extend_timer", {"room_code": code})
+        received = client.get_received()
+    assert "game:state" in _received_names(received)
+    assert rooms[code]["state"] == "submitting"
+
+
+def test_extend_timer_broadcasts_updated_timer_end(client):
+    """Extending the timer updates timer_end on the room."""
+    import time
+    code = room_store.create_room()["code"]
+    _join_and_become_host(client, code)
+    _setup_room_in_submitting(code, "some-player")
+    rooms[code]["timer_end"] = time.time() + 10
+    rooms[code]["timer_greenlet"] = MagicMock(dead=False)
+    before = time.time()
+    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+        client.emit("host:extend_timer", {"room_code": code})
+        client.get_received()
+    # timer_end should have grown by approximately EXTEND_AMOUNT
+    import game as game_module
+    assert rooms[code]["timer_end"] >= before + game_module.EXTEND_AMOUNT
+
+
+def test_extend_timer_non_host_emits_error(client):
+    """A plain player cannot extend the timer."""
+    code = room_store.create_room()["code"]
+    client.emit("player:join", {"room_code": code, "name": "Alice", "role": "player"})
+    client.get_received()
+    _setup_room_in_submitting(code, "some-player")
+    client.emit("host:extend_timer", {"room_code": code})
+    received = client.get_received()
+    assert "error" in _received_names(received)
+
+
+def test_extend_timer_unknown_room_emits_error(client):
+    client.emit("host:extend_timer", {"room_code": "XXXX"})
+    received = client.get_received()
+    assert "error" in _received_names(received)
+
+
+def test_extend_timer_wrong_state_emits_error(client):
+    """Cannot extend timer if the room is not in submitting state."""
+    code = room_store.create_room()["code"]
+    _join_and_become_host(client, code)
+    rooms[code]["state"] = "voting"
+    client.emit("host:extend_timer", {"room_code": code})
+    received = client.get_received()
+    assert "error" in _received_names(received)
+
+
+def test_extend_timer_player_not_in_room_emits_error(client):
+    """Socket that never joined a room cannot extend the timer."""
+    code = room_store.create_room()["code"]
+    rooms[code]["state"] = "submitting"
+    client.emit("host:extend_timer", {"room_code": code})
+    received = client.get_received()
+    assert "error" in _received_names(received)

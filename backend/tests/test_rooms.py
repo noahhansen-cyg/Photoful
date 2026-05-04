@@ -270,6 +270,21 @@ def test_add_submission_returns_false_when_not_submitting():
     assert room_store.add_submission(code, "pid-1", "p1", "/img.jpg") is False
 
 
+def test_add_submission_accepted_during_voting_intro_grace_window():
+    """A late upload that finishes just after the timer fires must still be recorded."""
+    code = _room_in_submitting()
+    rooms[code]["state"] = "voting_intro"
+    assert room_store.add_submission(code, "pid-1", "p1", "/img.jpg") is True
+    assert rooms[code]["prompts"][0]["submissions"]["p1"]["image_url"] == "/img.jpg"
+
+
+def test_add_submission_returns_false_after_voting_intro():
+    """Once voting has started, late submissions are rejected."""
+    code = _room_in_submitting()
+    rooms[code]["state"] = "scores"
+    assert room_store.add_submission(code, "pid-1", "p1", "/img.jpg") is False
+
+
 def test_add_submission_returns_false_for_unknown_prompt():
     code = _room_in_submitting()
     assert room_store.add_submission(code, "bad-prompt-id", "p1", "/img.jpg") is False

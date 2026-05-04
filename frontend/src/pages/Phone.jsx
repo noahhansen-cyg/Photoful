@@ -137,7 +137,7 @@ export default function Phone() {
       {error && <p style={styles.error}>{error}</p>}
 
       {state === "lobby"       && <LobbyScreen myRole={myRole} players={players} code={code} name={name} />}
-      {state === "submitting"    && <SubmittingScreen code={code} allPrompts={allPrompts} myPlayerId={myPlayerId} timeLeft={timeLeft} />}
+      {state === "submitting"    && <SubmittingScreen code={code} allPrompts={allPrompts} myPlayerId={myPlayerId} timeLeft={timeLeft} myRole={myRole} />}
       {state === "voting_intro"  && <VotingIntroScreen round={gameState?.round ?? 1} />}
       {state === "voting"        && <VotingScreen code={code} prompt={prompt} myPlayerId={myPlayerId} isAssigned={isAssigned} players={players} />}
       {state === "scores"      && <ScoresScreen gameState={gameState} players={players} myPlayerId={myPlayerId} />}
@@ -208,8 +208,12 @@ function LobbyScreen({ myRole, players, code, name }) {
 // Submitting — one card per assigned prompt, all shown simultaneously
 // ---------------------------------------------------------------------------
 
-function SubmittingScreen({ code, allPrompts, myPlayerId, timeLeft }) {
+function SubmittingScreen({ code, allPrompts, myPlayerId, timeLeft, myRole }) {
   const myPrompts = allPrompts.filter(p => p.player_ids?.includes(myPlayerId));
+
+  function extendTimer() {
+    socket.emit("host:extend_timer", { room_code: code });
+  }
 
   if (myPrompts.length === 0) {
     return (
@@ -217,6 +221,11 @@ function SubmittingScreen({ code, allPrompts, myPlayerId, timeLeft }) {
         <p style={styles.label}>Hang tight...</p>
         <p style={styles.hint}>Others are submitting their photos</p>
         {timeLeft !== null && <p style={styles.timer(timeLeft <= 10)}>{timeLeft}s</p>}
+        {myRole === "host" && (
+          <button style={styles.extendBtn} onClick={extendTimer}>
+            Extend Timer (+30s)
+          </button>
+        )}
       </div>
     );
   }
@@ -224,6 +233,11 @@ function SubmittingScreen({ code, allPrompts, myPlayerId, timeLeft }) {
   return (
     <div style={styles.section}>
       {timeLeft !== null && <p style={styles.timer(timeLeft <= 10)}>{timeLeft}s</p>}
+      {myRole === "host" && (
+        <button style={styles.extendBtn} onClick={extendTimer}>
+          Extend Timer (+30s)
+        </button>
+      )}
       {myPrompts.map(prompt => (
         <PromptSubmitCard
           key={prompt.prompt_id}
@@ -732,9 +746,20 @@ const styles = {
     width: "100%",
   }),
 
+  extendBtn: {
+    padding: "0.75rem 1.5rem",
+    fontSize: "0.95rem",
+    background: "#2d2d44",
+    color: "#ffd700",
+    border: "2px solid #ffd700",
+    borderRadius: 8,
+    cursor: "pointer",
+    fontWeight: "bold",
+  },
+
   voteOptions: { display: "flex", flexDirection: "column", gap: "1rem", width: "100%" },
   voteCard:    { background: "#1a1a2e", border: "2px solid #2d2d44", borderRadius: 12, padding: "0.75rem", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: "0.5rem", width: "100%", boxSizing: "border-box" },
-  voteImg:     { width: "100%", maxHeight: "220px", objectFit: "cover", borderRadius: 8 },
+  voteImg:     { width: "100%", maxHeight: "220px", objectFit: "contain", borderRadius: 8 },
   voteImgPlaceholder: { width: "100%", height: 120, background: "#2d2d44", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", color: "#555" },
   voteName: (color) => ({ fontWeight: "bold", color: color ?? "#fff", fontSize: "1.1rem" }),
   caption:     { fontSize: "0.85rem", color: "#aaa", fontStyle: "italic" },

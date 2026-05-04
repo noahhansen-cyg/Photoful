@@ -20,12 +20,10 @@ services:
       traefik.http.routers.quiplashapi.rule: "Host(`your.domain.here`) && (PathPrefix(`/api`) || PathPrefix(`/uploads`) || PathPrefix(`/socket.io`))"
       traefik.http.routers.quiplashapi.entryPoints: websecure
       traefik.http.routers.quiplashapi.tls.certresolver: cloudflare
-      traefik.http.routers.quiplashapi.middlewares: tinyauth
       traefik.http.services.quiplashapi.loadbalancer.server.port: "5000"
       traefik.docker.network: public
-
   frontend:
-    image: node:24.13.1-alpine
+    image: node:25.8.0-alpine
     container_name: quiplash_frontend
     restart: unless-stopped
     working_dir: /app
@@ -41,8 +39,5 @@ services:
       traefik.http.routers.quiplash.rule: "Host(`your.domain.here`)"
       traefik.http.routers.quiplash.entryPoints: websecure
       traefik.http.routers.quiplash.tls.certresolver: cloudflare
-      traefik.http.routers.quiplash.middlewares: tinyauth
       traefik.http.services.quiplash.loadbalancer.server.port: "3000"
       traefik.docker.network: public
-      tinyauth.apps.quiplash.config.domain: your.domain.here
-      tinyauth.apps.quiplash.oauth.whitelist: "user@example.com"
