@@ -29,7 +29,9 @@ import pytest
 import requests
 
 TIMER_SCALE = "0.2"
-STARTUP_TIMEOUT = 30  # seconds to wait for /healthz after spawning
+# First launch of a fresh binary can be slow on Windows CI runners
+# (Defender scans the unpacked bundle), so the startup budget is generous.
+STARTUP_TIMEOUT = 90  # seconds to wait for /healthz after spawning
 
 
 def _binary_path():
