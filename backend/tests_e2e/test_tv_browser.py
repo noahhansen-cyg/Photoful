@@ -43,12 +43,22 @@ def _create_room(server):
 @pytest.fixture(scope="module")
 def join_url(server, page):
     """Load the TV lobby the way the Electron window does and read the join URL."""
+    from playwright.sync_api import expect
+
     if _lan_ip() is None:
         pytest.skip("no LAN interface on this machine — QR would show localhost")
     code = _create_room(server)
     page.goto(f"{server.base_url}/room/{code}/tv")
-    url = page.get_by_test_id("join-url").inner_text(timeout=10_000)
-    return code, url
+    # The lobby renders window.location.host first and swaps in the LAN IP
+    # once its /api/server-info fetch resolves — wait out that swap. On a
+    # regression the text stays loopback; swallow the timeout so the asserts
+    # below report the actual URL instead.
+    locator = page.get_by_test_id("join-url")
+    try:
+        expect(locator).not_to_contain_text("127.0.0.1", timeout=10_000)
+    except AssertionError:
+        pass
+    return code, locator.inner_text()
 
 
 def test_join_url_uses_lan_ip_not_loopback(server, join_url):
