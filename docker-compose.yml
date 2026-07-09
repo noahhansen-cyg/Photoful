@@ -4,7 +4,7 @@ networks:
 services:
   backend:
     image: python:3.14.3-alpine
-    container_name: quiplash_backend
+    container_name: photoful_backend
     restart: unless-stopped
     working_dir: /app
     volumes:
@@ -17,14 +17,14 @@ services:
       - default
     labels:
       traefik.enable: "true"
-      traefik.http.routers.quiplashapi.rule: "Host(`your.domain.here`) && (PathPrefix(`/api`) || PathPrefix(`/uploads`) || PathPrefix(`/socket.io`))"
-      traefik.http.routers.quiplashapi.entryPoints: websecure
-      traefik.http.routers.quiplashapi.tls.certresolver: cloudflare
-      traefik.http.services.quiplashapi.loadbalancer.server.port: "5000"
+      traefik.http.routers.photofulapi.rule: "Host(`your.domain.here`) && (PathPrefix(`/api`) || PathPrefix(`/uploads`) || PathPrefix(`/socket.io`))"
+      traefik.http.routers.photofulapi.entryPoints: websecure
+      traefik.http.routers.photofulapi.tls.certresolver: cloudflare
+      traefik.http.services.photofulapi.loadbalancer.server.port: "5000"
       traefik.docker.network: public
   frontend:
     image: node:25.8.0-alpine
-    container_name: quiplash_frontend
+    container_name: photoful_frontend
     restart: unless-stopped
     working_dir: /app
     volumes:
@@ -36,8 +36,8 @@ services:
       - public
     labels:
       traefik.enable: "true"
-      traefik.http.routers.quiplash.rule: "Host(`your.domain.here`)"
-      traefik.http.routers.quiplash.entryPoints: websecure
-      traefik.http.routers.quiplash.tls.certresolver: cloudflare
-      traefik.http.services.quiplash.loadbalancer.server.port: "3000"
+      traefik.http.routers.photoful.rule: "Host(`your.domain.here`)"
+      traefik.http.routers.photoful.entryPoints: websecure
+      traefik.http.routers.photoful.tls.certresolver: cloudflare
+      traefik.http.services.photoful.loadbalancer.server.port: "3000"
       traefik.docker.network: public

@@ -1,4 +1,4 @@
-# Photo Quiplash — Architecture & Design
+# Photoful — Architecture & Design
 
 ## Overview
 
@@ -16,7 +16,9 @@ The server owns all state. Phones and TV are just views that re-render on every 
 ```
 ┌─────────────────────────────────────────┐
 │              Game Server                │
-│  Flask + Flask-SocketIO + gevent        │
+│  Flask + Flask-SocketIO (threading +    │
+│  simple-websocket — identical in dev,   │
+│  cloud, and the packaged desktop app)   │
 │  - Room management (in-memory)          │
 │  - Game state machine                   │
 │  - WebSocket hub                        │
@@ -249,18 +251,25 @@ Photos are large — they go over HTTP, not WebSocket.
 
 ## Timer System
 
-Timers use gevent greenlets:
+Timers use plain `threading.Timer`, so the exact same code runs in dev, in the
+cloud deploy, and inside the PyInstaller binary — no gevent anywhere:
 
 ```python
 def _start_timer(room_code, seconds, callback, socketio):
-    def _run():
-        gevent.sleep(seconds)
-        room["timer_greenlet"] = None
-        callback()
-    return gevent.spawn(_run)
+    def _fire():
+        with _lock:                          # serialized with early-advance paths
+            if room.get("timer") is not timer:
+                return                       # cancelled/replaced while waiting
+            room["timer"] = None
+            callback()
+    timer = threading.Timer(seconds, _fire)
 ```
 
-`cancel_timer(room)` kills the greenlet early (when all players act before time runs out).
+`cancel_timer(room)` cancels the pending timer, and `advance_now(code, socketio,
+expected_state=...)` atomically cancels + advances when all players act before
+time runs out. The expected-state guard prevents two concurrent handlers (e.g.
+the last two captions arriving simultaneously) from double-advancing the state
+machine.
 
 Timeouts:
 - Submit: 120s
@@ -442,7 +451,7 @@ room form) that acts as the game's entry point.
 
 ```
 ┌─────────────────────────────────┐
-│       📸  Photo Quiplash        │
+│       📸  Photoful        │
 │                                 │
 │   [ Play Online  ]              │
 │   [ Play Local   ]              │
@@ -480,11 +489,11 @@ there just like on LAN. No P2P, no tunnelling, no NAT traversal.
 
 ```
 Host PC (Electron app, Online mode)
-  └─ connects to https://photoquiplash.fly.dev
+  └─ connects to https://photoful.fly.dev
        └─ creates room, gets room code
 
 Player phones
-  └─ open https://photoquiplash.fly.dev
+  └─ open https://photoful.fly.dev
        └─ enter room code → join
 ```
 
@@ -525,7 +534,7 @@ play in LAN mode. Online is the default for ease; Local can be selected at the m
 | Room creation | On cloud server | On embedded server |
 | QR code | Points to cloud URL | Points to local network IP (current behaviour) |
 | Internet required | Yes | No (LAN only) |
-| Player join URL | `https://photoquiplash.fly.dev` | `http://192.168.x.x:5000` |
+| Player join URL | `https://photoful.fly.dev` | `http://192.168.x.x:5000` |
 
 **Implementation:**
 - `socket.js` reads a `MODE` env/config value: `"online"` → connects to cloud URL;

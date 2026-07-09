@@ -247,7 +247,7 @@ def test_start_transitions_room_to_submitting(client):
     code = room_store.create_room()["code"]
     _join_and_become_host(client, code)
     _add_player_direct(code, "p2", "Bob")
-    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+    with patch("game._start_timer", return_value=MagicMock()):
         client.emit("host:start", {"room_code": code})
     assert rooms[code]["state"] == "submitting"
 
@@ -256,7 +256,7 @@ def test_start_broadcasts_game_state(client):
     code = room_store.create_room()["code"]
     _join_and_become_host(client, code)
     _add_player_direct(code, "p2", "Bob")
-    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+    with patch("game._start_timer", return_value=MagicMock()):
         client.emit("host:start", {"room_code": code})
     received = client.get_received()
     assert "game:state" in _received_names(received)
@@ -268,7 +268,7 @@ def test_start_non_host_player_emits_error(client):
     client.emit("player:join", {"room_code": code, "name": "Alice", "role": "player"})
     client.get_received()
     _add_player_direct(code, "p2", "Bob")
-    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+    with patch("game._start_timer", return_value=MagicMock()):
         client.emit("host:start", {"room_code": code})
     received = client.get_received()
     assert "error" in _received_names(received)
@@ -279,7 +279,7 @@ def test_start_too_few_players_emits_error(client):
     code = room_store.create_room()["code"]
     _join_and_become_host(client, code)
     # Only Alice (the host) — no second player
-    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+    with patch("game._start_timer", return_value=MagicMock()):
         client.emit("host:start", {"room_code": code})
     received = client.get_received()
     assert "error" in _received_names(received)
@@ -629,7 +629,7 @@ def test_submit_caption_advances_early_when_all_submitted(client):
     received = client.get_received()
     player_id = next(r["args"][0]["player_id"] for r in received if r["name"] == "player:self")
     _setup_room_in_captioning(code, player_id)
-    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+    with patch("game._start_timer", return_value=MagicMock()):
         client.emit("submit:caption", {"room_code": code, "caption_text": "My caption"})
         client.get_received()
     assert rooms[code]["state"] == "caption_voting"
@@ -656,8 +656,8 @@ def test_submit_caption_advances_early_when_last_of_multiple_players_submits(cli
         "votes":                {},
         "score_deltas":         {},
     }
-    rooms[code]["timer_greenlet"] = MagicMock(dead=False)
-    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+    rooms[code]["timer"] = MagicMock()
+    with patch("game._start_timer", return_value=MagicMock()):
         client.emit("submit:caption", {"room_code": code, "caption_text": "Alice's caption"})
         client.get_received()
     assert rooms[code]["state"] == "caption_voting"
@@ -711,8 +711,8 @@ def test_submit_caption_late_joiner_does_not_block_early_advance(client):
         "votes":                {},
         "score_deltas":         {},
     }
-    rooms[code]["timer_greenlet"] = MagicMock(dead=False)
-    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+    rooms[code]["timer"] = MagicMock()
+    with patch("game._start_timer", return_value=MagicMock()):
         client.emit("submit:caption", {"room_code": code, "caption_text": "Alice's caption"})
         client.get_received()
     assert rooms[code]["state"] == "caption_voting"
@@ -784,7 +784,7 @@ def test_submit_caption_vote_advances_early_when_all_voted(client):
     _setup_room_in_caption_voting(code, voter_id, candidate_id)
     # Pre-populate Bob's vote so Alice's vote completes all_voted
     rooms[code]["caption_prompt"]["votes"][candidate_id] = voter_id
-    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+    with patch("game._start_timer", return_value=MagicMock()):
         client.emit("submit:caption_vote", {"room_code": code, "voted_for_id": candidate_id})
         client.get_received()
     assert rooms[code]["state"] == "caption_scores"
@@ -915,8 +915,8 @@ def test_submit_photo_accepted_during_voting_intro_grace_window(client):
     _setup_room_in_submitting(code, player_id, other_id)
     # Simulate: timer fired, state advanced to voting_intro before Alice's upload finished
     rooms[code]["state"] = "voting_intro"
-    rooms[code]["timer_greenlet"] = MagicMock(dead=False)
-    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+    rooms[code]["timer"] = MagicMock()
+    with patch("game._start_timer", return_value=MagicMock()):
         client.emit("submit:photo", {
             "room_code": code, "prompt_id": "pid-1", "image_url": "/late.jpg",
         })
@@ -938,8 +938,8 @@ def test_submit_photo_during_voting_intro_advances_to_voting_when_all_done(clien
     # Bob already submitted; Alice's is the last one but arrives during voting_intro
     rooms[code]["prompts"][0]["submissions"][other_id] = {"image_url": "/bob.jpg", "caption": None}
     rooms[code]["state"] = "voting_intro"
-    rooms[code]["timer_greenlet"] = MagicMock(dead=False)
-    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+    rooms[code]["timer"] = MagicMock()
+    with patch("game._start_timer", return_value=MagicMock()):
         client.emit("submit:photo", {
             "room_code": code, "prompt_id": "pid-1", "image_url": "/late.jpg",
         })
@@ -958,8 +958,8 @@ def test_submit_photo_advances_early_when_all_submitted(client):
     _setup_room_in_submitting(code, player_id, other_id)
     # Pre-populate the other player's submission so Alice's is the last one.
     rooms[code]["prompts"][0]["submissions"][other_id] = {"image_url": "/img.jpg", "caption": None}
-    rooms[code]["timer_greenlet"] = MagicMock(dead=False)
-    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+    rooms[code]["timer"] = MagicMock()
+    with patch("game._start_timer", return_value=MagicMock()):
         client.emit("submit:photo", {
             "room_code": code, "prompt_id": "pid-1", "image_url": "/img2.jpg",
         })
@@ -985,8 +985,8 @@ def test_submit_vote_advances_early_when_all_voted(client):
     rooms[code]["current_prompt_idx"] = 0
     for pid, name in [("p1", "CompeteA"), ("p2", "CompeteB")]:
         _add_player_direct(code, pid, name)
-    rooms[code]["timer_greenlet"] = MagicMock(dead=False)
-    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+    rooms[code]["timer"] = MagicMock()
+    with patch("game._start_timer", return_value=MagicMock()):
         client.emit("submit:vote", {
             "room_code": code, "prompt_id": "pid-1", "voted_for_id": "p1",
         })
@@ -1003,8 +1003,8 @@ def test_extend_timer_host_extends_successfully(client):
     code = room_store.create_room()["code"]
     _join_and_become_host(client, code)
     _setup_room_in_submitting(code, "some-player")
-    rooms[code]["timer_greenlet"] = MagicMock(dead=False)
-    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+    rooms[code]["timer"] = MagicMock()
+    with patch("game._start_timer", return_value=MagicMock()):
         client.emit("host:extend_timer", {"room_code": code})
         received = client.get_received()
     assert "game:state" in _received_names(received)
@@ -1018,9 +1018,9 @@ def test_extend_timer_broadcasts_updated_timer_end(client):
     _join_and_become_host(client, code)
     _setup_room_in_submitting(code, "some-player")
     rooms[code]["timer_end"] = time.time() + 10
-    rooms[code]["timer_greenlet"] = MagicMock(dead=False)
+    rooms[code]["timer"] = MagicMock()
     before = time.time()
-    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+    with patch("game._start_timer", return_value=MagicMock()):
         client.emit("host:extend_timer", {"room_code": code})
         client.get_received()
     # timer_end should have grown by approximately EXTEND_AMOUNT

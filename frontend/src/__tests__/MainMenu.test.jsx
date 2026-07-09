@@ -30,7 +30,7 @@ beforeEach(() => {
 describe("MainMenu rendering", () => {
   it("shows the game title", () => {
     renderMenu();
-    expect(screen.getByText(/photo quiplash/i)).toBeInTheDocument();
+    expect(screen.getByText(/photoful/i)).toBeInTheDocument();
   });
 
   it("shows a Play button", () => {

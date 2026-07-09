@@ -241,14 +241,18 @@ def test_not_frozen_in_dev():
     assert app_module._FROZEN is False
 
 
-def test_async_mode_is_gevent_in_dev():
-    """Dev mode must use gevent so the existing make-dev workflow is unchanged."""
-    assert app_module.ASYNC_MODE == "gevent"
+def test_async_mode_is_threading_everywhere():
+    """One async mode everywhere — dev, cloud, and the packaged binary must
+    all run the identical threading + simple-websocket stack."""
+    assert app_module.socketio.async_mode == "threading"
 
 
-def test_frontend_dist_is_none_in_dev():
-    """_FRONTEND_DIST must be None outside a frozen bundle (SPA route not registered)."""
-    assert app_module._FRONTEND_DIST is None
+def test_frontend_dist_is_real_build_or_none():
+    """_FRONTEND_DIST is the built SPA when one exists, otherwise None.
+    It must never point at a directory without an index.html."""
+    dist = app_module._FRONTEND_DIST
+    if dist is not None:
+        assert os.path.isfile(os.path.join(dist, "index.html"))
 
 
 def test_upload_dir_exists():

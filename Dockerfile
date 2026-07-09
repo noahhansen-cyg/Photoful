@@ -18,6 +18,7 @@ COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 
 EXPOSE 5000
 
-# gunicorn + geventwebsocket for WebSocket support.
+# gunicorn threaded worker + simple-websocket for WebSocket support — the same
+# threading async mode the dev server and packaged binary use.
 # Single worker required (in-memory room state).
-CMD ["sh", "-c", "cd backend && gunicorn --worker-class geventwebsocket.gunicorn.workers.GeventWebSocketWorker --workers 1 --timeout 120 --bind 0.0.0.0:${PORT:-5000} app:app"]
+CMD ["sh", "-c", "cd backend && gunicorn --workers 1 --threads 100 --timeout 120 --bind 0.0.0.0:${PORT:-5000} app:app"]

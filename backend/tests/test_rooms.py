@@ -461,7 +461,7 @@ def _room_with_final_state():
     rooms[code]["prompts"]            = [_make_prompt(["p1", "p2"])]
     rooms[code]["current_prompt_idx"] = 1
     rooms[code]["timer_end"]          = 9_999_999.0
-    rooms[code]["timer_greenlet"]     = "sentinel-greenlet"
+    rooms[code]["timer"]     = "sentinel-greenlet"
     rooms[code]["host_id"]            = "p1"
     for p in rooms[code]["players"]:
         p["score"] = 1000
@@ -501,10 +501,10 @@ def test_reset_room_clears_timer_end():
     assert rooms[code]["timer_end"] is None
 
 
-def test_reset_room_clears_timer_greenlet():
+def test_reset_room_clears_timer():
     code = _room_with_final_state()
     room_store.reset_room(code)
-    assert rooms[code]["timer_greenlet"] is None
+    assert rooms[code]["timer"] is None
 
 
 def test_reset_room_zeroes_all_player_scores():

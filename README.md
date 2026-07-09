@@ -1,4 +1,4 @@
-# Photo Quiplash
+# Photoful
 
 A party game like Quiplash, but with photos. A prompt appears — players take photos from their phones and submit them. Everyone votes. Chaos ensues.
 
@@ -16,14 +16,14 @@ A party game like Quiplash, but with photos. A prompt appears — players take p
 ## Project Structure
 
 ```
-quiplash_but_fun_and_pictures-/
+photoful/
 ├── backend/
 │   ├── app.py           # Flask app, REST routes, WebSocket events
 │   ├── game.py          # State machine, prompt assignment, scoring
 │   ├── rooms.py         # In-memory room/player state management
 │   ├── bots.py          # Bot players for local testing (make devtest)
 │   ├── prompts.json     # Bank of 46 photo prompts
-│   ├── quiplash.spec    # PyInstaller spec — bundles server into a binary
+│   ├── photoful.spec    # PyInstaller spec — bundles server into a binary
 │   ├── uploads/         # Uploaded photos (created at runtime)
 │   └── requirements.txt
 ├── electron/
@@ -79,8 +79,9 @@ make dev       # start backend + frontend together
 | Command | Description |
 |---|---|
 | `make build-frontend` | Build the React app into `frontend/dist/` |
-| `make build-backend` | Bundle Flask + frontend into a single binary via PyInstaller |
-| `make build-electron` | Wrap the binary in an Electron installer |
+| `make build-backend` | Bundle Flask + frontend into `backend/dist/photoful-server/` via PyInstaller |
+| `make build-electron` | Wrap the server bundle in an Electron installer |
+| `make package-dir` | Fast unpacked desktop build (no installer) for local testing |
 | `make package` | Full pipeline — outputs installer to `dist/` |
 
 ---
@@ -153,26 +154,44 @@ Bots vote with a 5–10s random delay so you have time to vote first.
 
 `make package` produces a double-clickable installer that bundles the entire game — no Python, Node, or terminal required. It is compatible with Steam and other game launchers.
 
+**The desktop app is 1:1 with the web app.** There is no separate "packaged mode": the server runs the exact same Flask + Flask-SocketIO threading/simple-websocket stack in development, in the cloud deploy, and inside the binary. The only packaged-app differences are where uploads are written (user-data dir) and that the port is picked dynamically at launch.
+
 ### How it works
 
 1. **Vite build** — React app compiled to `frontend/dist/`
-2. **PyInstaller** — Flask server + all Python dependencies + the built frontend bundled into a single binary (`backend/dist/quiplash-server`)
-3. **Electron** — The binary is wrapped in an Electron app that spawns it on launch, waits for it to be ready, then opens a `1280×720` game window
+2. **PyInstaller (onedir)** — Flask server + dependencies + the built frontend bundled into `backend/dist/photoful-server/` (a folder, not a single-file exe: faster startup, no temp-dir self-extraction, far fewer antivirus false positives)
+3. **Electron** — ships that folder as a resource; on launch it picks a **free port** (never a hardcoded one — macOS AirPlay squats on 5000), spawns the server with `PORT=<port>`, waits for `/healthz`, and opens a `1280×720` game window. Phones join over LAN exactly like the web version, via the QR code on the TV screen
 
 ### Output
 
-| Platform | File |
-|---|---|
-| macOS | `dist/Photo Quiplash.dmg` (x64 + arm64) |
-| Windows | `dist/Photo Quiplash Setup.exe` |
+| Platform | Installer | Steam depot (unpacked) |
+|---|---|---|
+| macOS | `dist/Photoful-<ver>.dmg` / `.zip` | `dist/mac*/Photoful.app` |
+| Windows | `dist/Photoful Setup <ver>.exe` / `.zip` | `dist/win-unpacked/` |
+| Linux | `dist/Photoful-<ver>.AppImage` / `.tar.gz` | `dist/linux-unpacked/` |
 
 ### Incremental build
 
 ```bash
 make build-frontend   # step 1 only (fast, ~5s)
 make build-backend    # steps 1–2 (slow first run, ~2–3 min)
+make package-dir      # steps 1–3, unpacked app only (fastest way to test)
 make build-electron   # steps 1–3 (produces the installer)
 ```
+
+To test the desktop app locally: `make package-dir`, then open `dist/mac-arm64/Photoful.app` (or the `-unpacked` folder on Windows/Linux).
+
+You can also test the exact server the app will ship without Electron:
+
+```bash
+make build-backend
+PORT=8934 ./backend/dist/photoful-server/photoful-server
+# open http://localhost:8934 — full game, same as the web app
+```
+
+### Building for all three platforms
+
+PyInstaller can't cross-compile, so each OS builds its own bundle. The GitHub Actions workflow `.github/workflows/package.yml` builds macOS, Windows, and Linux in one go — trigger it from the Actions tab, or push a tag like `v0.2.0`. Each platform uploads two artifacts: the installers, and the unpacked directory for Steam.
 
 ### Uploaded photos
 
@@ -180,13 +199,16 @@ In the packaged app, photos are stored in a writable user-data directory rather 
 
 | Platform | Location |
 |---|---|
-| macOS | `~/Library/Application Support/PhotoQuiplash/uploads/` |
-| Windows | `%APPDATA%\PhotoQuiplash\uploads\` |
-| Linux | `~/.photoquiplash/uploads/` |
+| macOS | `~/Library/Application Support/Photoful/uploads/` |
+| Windows | `%APPDATA%\Photoful\uploads\` |
+| Linux | `~/.photoful/uploads/` |
 
 ### Steam
 
-Set the Electron `.exe` (Windows) or `.app` bundle (macOS) as the launch target in Steamworks. No Steamworks SDK integration is needed for basic launcher compatibility.
+1. In Steamworks, create one depot per platform and upload the unpacked builds (`dist/mac*/Photoful.app`, `dist/win-unpacked/`, `dist/linux-unpacked/`) via SteamPipe/steamcmd.
+2. Launch options: `Photoful.exe` (Windows), `Photoful.app` (macOS), `photoful` (Linux).
+3. No Steamworks SDK integration is needed for basic launcher compatibility. Players' phones connect over the local network, so the game needs no Steam networking.
+4. For public release you will want code signing (macOS notarization, Windows Authenticode) — unsigned builds trigger Gatekeeper/SmartScreen warnings outside Steam, though Steam's own client bypasses most of this.
 
 ---
 
@@ -195,8 +217,7 @@ Set the Electron `.exe` (Windows) or `.app` bundle (macOS) as the launch target 
 | Layer | Technology |
 |---|---|
 | Backend | Python, Flask, Flask-SocketIO |
-| WebSockets (dev) | gevent + Flask-SocketIO |
-| WebSockets (packaged) | threading async mode (avoids gevent/PyInstaller issues) |
+| WebSockets | threading async mode + simple-websocket — identical in dev, cloud, and the packaged app |
 | Image processing | Pillow (server-side resize to 1280px JPEG) |
 | Frontend | React, Vite |
 | Real-time client | socket.io-client |

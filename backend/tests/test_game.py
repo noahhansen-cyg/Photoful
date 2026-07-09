@@ -355,32 +355,66 @@ def test_apply_scores_returns_empty_for_unknown_room():
 # cancel_timer
 # ---------------------------------------------------------------------------
 
-def test_cancel_timer_kills_live_greenlet():
-    mock_gl = MagicMock()
-    mock_gl.dead = False
-    room = {"timer_greenlet": mock_gl}
+def test_cancel_timer_cancels_live_timer():
+    mock_timer = MagicMock()
+    room = {"timer": mock_timer}
 
     game.cancel_timer(room)
 
-    mock_gl.kill.assert_called_once()
-    assert room["timer_greenlet"] is None
+    mock_timer.cancel.assert_called_once()
+    assert room["timer"] is None
 
 
-def test_cancel_timer_skips_dead_greenlet():
-    mock_gl = MagicMock()
-    mock_gl.dead = True
-    room = {"timer_greenlet": mock_gl}
-
-    game.cancel_timer(room)
-
-    mock_gl.kill.assert_not_called()
-    assert room["timer_greenlet"] is None
-
-
-def test_cancel_timer_handles_none_greenlet():
-    room = {"timer_greenlet": None}
+def test_cancel_timer_handles_none_timer():
+    room = {"timer": None}
     game.cancel_timer(room)  # should not raise
-    assert room["timer_greenlet"] is None
+    assert room["timer"] is None
+
+
+def test_cancelled_timer_never_fires_callback():
+    """cancel_timer must prevent the pending callback from running."""
+    import time as _time
+    called = []
+    code, _ = _room_with_n_players(2)
+    game._start_timer(code, 0.05, lambda: called.append(True), MagicMock())
+    game.cancel_timer(rooms[code])
+    _time.sleep(0.2)
+    assert not called, "callback ran despite cancellation"
+
+
+# ---------------------------------------------------------------------------
+# advance_now — expected_state guard against concurrent double-advance
+# ---------------------------------------------------------------------------
+
+def test_advance_now_advances_matching_state():
+    code, _ = _room_in_submitting()
+    mock_io = _mock_socketio()
+    with patch("game._start_timer", return_value=MagicMock()):
+        game.advance_now(code, mock_io, expected_state="submitting")
+    assert rooms[code]["state"] == "voting_intro"
+
+
+def test_advance_now_noops_when_state_already_moved():
+    """Two handlers both seeing 'phase complete' must only advance once."""
+    code, _ = _room_in_submitting()
+    mock_io = _mock_socketio()
+    with patch("game._start_timer", return_value=MagicMock()):
+        game.advance_now(code, mock_io, expected_state="submitting")
+        game.advance_now(code, mock_io, expected_state="submitting")
+    assert rooms[code]["state"] == "voting_intro"
+
+
+def test_advance_now_without_expected_state_always_advances():
+    code, _ = _room_in_submitting()
+    mock_io = _mock_socketio()
+    with patch("game._start_timer", return_value=MagicMock()):
+        game.advance_now(code, mock_io)
+        game.advance_now(code, mock_io)
+    assert rooms[code]["state"] == "voting"
+
+
+def test_advance_now_handles_unknown_room():
+    game.advance_now("ZZZZ", _mock_socketio())  # must not raise
 
 
 # ---------------------------------------------------------------------------
@@ -395,28 +429,28 @@ def _mock_socketio():
 
 def test_start_game_returns_false_for_unknown_room():
     mock_io = _mock_socketio()
-    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+    with patch("game._start_timer", return_value=MagicMock()):
         assert game.start_game("XXXX", mock_io) is False
 
 
 def test_start_game_returns_false_with_fewer_than_two_players():
     code, _ = _room_with_n_players(1)
     mock_io = _mock_socketio()
-    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+    with patch("game._start_timer", return_value=MagicMock()):
         assert game.start_game(code, mock_io) is False
 
 
 def test_start_game_returns_true_with_two_players():
     code, _ = _room_with_n_players(2)
     mock_io = _mock_socketio()
-    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+    with patch("game._start_timer", return_value=MagicMock()):
         assert game.start_game(code, mock_io) is True
 
 
 def test_start_game_sets_state_to_submitting():
     code, _ = _room_with_n_players(2)
     mock_io = _mock_socketio()
-    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+    with patch("game._start_timer", return_value=MagicMock()):
         game.start_game(code, mock_io)
     assert rooms[code]["state"] == "submitting"
 
@@ -424,7 +458,7 @@ def test_start_game_sets_state_to_submitting():
 def test_start_game_assigns_prompts():
     code, _ = _room_with_n_players(2)
     mock_io = _mock_socketio()
-    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+    with patch("game._start_timer", return_value=MagicMock()):
         game.start_game(code, mock_io)
     # 2 players → PROMPTS_PER_PLAYER prompts each, all shared = PROMPTS_PER_PLAYER total
     assert len(rooms[code]["prompts"]) == game.PROMPTS_PER_PLAYER
@@ -433,7 +467,7 @@ def test_start_game_assigns_prompts():
 def test_start_game_sets_timer_end():
     code, _ = _room_with_n_players(2)
     mock_io = _mock_socketio()
-    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+    with patch("game._start_timer", return_value=MagicMock()):
         game.start_game(code, mock_io)
     assert rooms[code]["timer_end"] is not None
 
@@ -441,7 +475,7 @@ def test_start_game_sets_timer_end():
 def test_start_game_broadcasts_game_state():
     code, _ = _room_with_n_players(2)
     mock_io = _mock_socketio()
-    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+    with patch("game._start_timer", return_value=MagicMock()):
         game.start_game(code, mock_io)
     mock_io.emit.assert_called_once_with("game:state", mock_io.emit.call_args[0][1], to=code)
 
@@ -462,7 +496,7 @@ def _room_in_submitting(n=2):
 def test_advance_state_submitting_to_voting_intro():
     code, _ = _room_in_submitting()
     mock_io = _mock_socketio()
-    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+    with patch("game._start_timer", return_value=MagicMock()):
         game.advance_state(code, mock_io)
     assert rooms[code]["state"] == "voting_intro"
     assert rooms[code]["current_prompt_idx"] == 0
@@ -473,7 +507,7 @@ def test_advance_state_voting_intro_to_voting():
     code, _ = _room_in_submitting()
     rooms[code]["state"] = "voting_intro"
     mock_io = _mock_socketio()
-    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+    with patch("game._start_timer", return_value=MagicMock()):
         game.advance_state(code, mock_io)
     assert rooms[code]["state"] == "voting"
     assert rooms[code]["timer_end"] is not None
@@ -487,7 +521,7 @@ def test_advance_state_voting_to_scores():
     code, player_ids = _room_in_submitting()
     rooms[code]["state"] = "voting"
     mock_io = _mock_socketio()
-    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+    with patch("game._start_timer", return_value=MagicMock()):
         game.advance_state(code, mock_io)
     assert rooms[code]["state"] == "scores"
 
@@ -497,7 +531,7 @@ def test_advance_state_scores_to_next_voting():
     rooms[code]["state"] = "scores"
     rooms[code]["current_prompt_idx"] = 0  # still prompts left
     mock_io = _mock_socketio()
-    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+    with patch("game._start_timer", return_value=MagicMock()):
         game.advance_state(code, mock_io)
     assert rooms[code]["state"] == "voting"
     assert rooms[code]["current_prompt_idx"] == 1
@@ -510,7 +544,7 @@ def test_advance_state_scores_to_final_on_last_prompt():
     last_idx = len(rooms[code]["prompts"]) - 1
     rooms[code]["current_prompt_idx"] = last_idx
     mock_io = _mock_socketio()
-    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+    with patch("game._start_timer", return_value=MagicMock()):
         game.advance_state(code, mock_io)
     assert rooms[code]["state"] == "final"
 
@@ -522,7 +556,7 @@ def test_advance_state_final_clears_timer_end():
     last_idx = len(rooms[code]["prompts"]) - 1
     rooms[code]["current_prompt_idx"] = last_idx
     mock_io = _mock_socketio()
-    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+    with patch("game._start_timer", return_value=MagicMock()):
         game.advance_state(code, mock_io)
     assert rooms[code]["timer_end"] is None
 
@@ -530,7 +564,7 @@ def test_advance_state_final_clears_timer_end():
 def test_advance_state_broadcasts_game_state():
     code, _ = _room_in_submitting()
     mock_io = _mock_socketio()
-    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+    with patch("game._start_timer", return_value=MagicMock()):
         game.advance_state(code, mock_io)
     mock_io.emit.assert_called_with("game:state", mock_io.emit.call_args[0][1], to=code)
 
@@ -567,7 +601,7 @@ def test_advance_state_voting_to_scores_stores_score_deltas_on_prompt():
     rooms[code]["prompts"][0]["votes"] = {"voter1": p1_id}
 
     mock_io = _mock_socketio()
-    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+    with patch("game._start_timer", return_value=MagicMock()):
         game.advance_state(code, mock_io)
 
     assert "score_deltas" in rooms[code]["prompts"][0]
@@ -583,7 +617,7 @@ def test_start_game_excludes_disconnected_players():
     code, _ = _room_with_n_players(2)
     rooms[code]["players"][0]["is_connected"] = False
     mock_io = _mock_socketio()
-    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+    with patch("game._start_timer", return_value=MagicMock()):
         result = game.start_game(code, mock_io)
     assert result is False  # only 1 connected player → cannot start
 
@@ -597,7 +631,7 @@ def test_start_game_excludes_tv_players_from_prompt_assignments():
     }
     room_store.add_player(code, tv)
     mock_io = _mock_socketio()
-    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+    with patch("game._start_timer", return_value=MagicMock()):
         game.start_game(code, mock_io)
     all_assigned_ids = {pid for p in rooms[code]["prompts"] for pid in p["player_ids"]}
     assert "tv1" not in all_assigned_ids
@@ -707,7 +741,7 @@ def test_start_game_timer_end_is_submit_timeout_from_now():
     code, _ = _room_with_n_players(2)
     mock_io = _mock_socketio()
     before = _time.time()
-    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+    with patch("game._start_timer", return_value=MagicMock()):
         game.start_game(code, mock_io)
     after = _time.time()
     expected_min = before + game.SUBMIT_TIMEOUT
@@ -768,7 +802,7 @@ def test_advance_state_scores_to_round_intro_after_last_prompt_round_1():
     last_idx = len(rooms[code]["prompts"]) - 1
     rooms[code]["current_prompt_idx"] = last_idx
     mock_io = _mock_socketio()
-    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+    with patch("game._start_timer", return_value=MagicMock()):
         game.advance_state(code, mock_io)
     assert rooms[code]["state"] == "round_intro"
     assert rooms[code]["round"] == 2
@@ -785,7 +819,7 @@ def test_round_intro_clears_votes_and_score_deltas():
         p["votes"]        = {"voter": player_ids[0]}
         p["score_deltas"] = {player_ids[0]: 1000, player_ids[1]: 0}
     mock_io = _mock_socketio()
-    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+    with patch("game._start_timer", return_value=MagicMock()):
         game.advance_state(code, mock_io)
     for p in rooms[code]["prompts"]:
         assert p["votes"]        == {}
@@ -798,7 +832,7 @@ def test_advance_state_round_intro_to_submitting():
     rooms[code]["round"] = 2
     rooms[code]["current_prompt_idx"] = len(rooms[code]["prompts"]) - 1
     mock_io = _mock_socketio()
-    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+    with patch("game._start_timer", return_value=MagicMock()):
         game.advance_state(code, mock_io)
     assert rooms[code]["state"] == "submitting"
     assert rooms[code]["current_prompt_idx"] == 0
@@ -810,7 +844,7 @@ def test_advance_state_round_intro_assigns_new_prompts():
     rooms[code]["state"] = "round_intro"
     rooms[code]["round"] = 2
     mock_io = _mock_socketio()
-    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+    with patch("game._start_timer", return_value=MagicMock()):
         game.advance_state(code, mock_io)
     new_prompt_ids = {p["prompt_id"] for p in rooms[code]["prompts"]}
     # Fresh prompts generated — none of the old IDs should remain
@@ -823,7 +857,7 @@ def test_advance_state_round_intro_sets_timer_end():
     rooms[code]["state"] = "round_intro"
     rooms[code]["round"] = 2
     mock_io = _mock_socketio()
-    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+    with patch("game._start_timer", return_value=MagicMock()):
         game.advance_state(code, mock_io)
     assert rooms[code]["timer_end"] is not None
 
@@ -835,7 +869,7 @@ def test_advance_state_scores_to_final_after_round_2_last_prompt():
     last_idx = len(rooms[code]["prompts"]) - 1
     rooms[code]["current_prompt_idx"] = last_idx
     mock_io = _mock_socketio()
-    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+    with patch("game._start_timer", return_value=MagicMock()):
         game.advance_state(code, mock_io)
     assert rooms[code]["state"] == "final"
 
@@ -980,7 +1014,7 @@ def _room_in_scores_round2_last_prompt_with_submissions():
 def test_advance_state_scores_to_caption_intro_after_round_2():
     code, _ = _room_in_scores_round2_last_prompt_with_submissions()
     mock_io = _mock_socketio()
-    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+    with patch("game._start_timer", return_value=MagicMock()):
         game.advance_state(code, mock_io)
     assert rooms[code]["state"] == "caption_intro"
     assert rooms[code]["caption_prompt"] is not None
@@ -996,7 +1030,7 @@ def test_advance_state_scores_to_final_if_no_best_photo():
     rooms[code]["current_prompt_idx"] = last_idx
     # No submissions — find_best_photo returns None
     mock_io = _mock_socketio()
-    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+    with patch("game._start_timer", return_value=MagicMock()):
         game.advance_state(code, mock_io)
     assert rooms[code]["state"] == "final"
 
@@ -1005,7 +1039,7 @@ def test_advance_state_caption_intro_to_captioning():
     code, _ = _room_in_submitting()
     rooms[code]["state"] = "caption_intro"
     mock_io = _mock_socketio()
-    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+    with patch("game._start_timer", return_value=MagicMock()):
         game.advance_state(code, mock_io)
     assert rooms[code]["state"] == "captioning"
     assert rooms[code]["timer_end"] is not None
@@ -1015,7 +1049,7 @@ def test_advance_state_captioning_to_caption_voting():
     code, _ = _room_in_submitting()
     rooms[code]["state"] = "captioning"
     mock_io = _mock_socketio()
-    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+    with patch("game._start_timer", return_value=MagicMock()):
         game.advance_state(code, mock_io)
     assert rooms[code]["state"] == "caption_voting"
     assert rooms[code]["timer_end"] is not None
@@ -1034,7 +1068,7 @@ def test_advance_state_caption_voting_to_caption_scores():
     cp["votes"] = {"voter": player_ids[0]}
     rooms[code]["caption_prompt"] = cp
     mock_io = _mock_socketio()
-    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+    with patch("game._start_timer", return_value=MagicMock()):
         game.advance_state(code, mock_io)
     assert rooms[code]["state"] == "caption_scores"
     assert rooms[code]["caption_prompt"]["score_deltas"] is not None
@@ -1055,7 +1089,7 @@ def test_advance_state_caption_voting_uses_double_points():
     cp["votes"] = {"voter1": p1_id, "voter2": p1_id}
     rooms[code]["caption_prompt"] = cp
     mock_io = _mock_socketio()
-    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+    with patch("game._start_timer", return_value=MagicMock()):
         game.advance_state(code, mock_io)
     p1 = next(p for p in rooms[code]["players"] if p["id"] == p1_id)
     assert p1["score"] == game.POINTS_PER_VOTE * 2 * 2  # 2 votes × 2× multiplier
@@ -1065,7 +1099,7 @@ def test_advance_state_caption_scores_to_final():
     code, _ = _room_in_submitting()
     rooms[code]["state"] = "caption_scores"
     mock_io = _mock_socketio()
-    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+    with patch("game._start_timer", return_value=MagicMock()):
         game.advance_state(code, mock_io)
     assert rooms[code]["state"] == "final"
     assert rooms[code]["timer_end"] is None
@@ -1141,25 +1175,32 @@ def test_advance_state_returns_early_when_room_not_found():
 
 
 # ---------------------------------------------------------------------------
-# _start_timer — greenlet body
+# _start_timer — timer thread body
 # ---------------------------------------------------------------------------
 
 def test_start_timer_calls_callback_after_delay():
-    """The greenlet spawned by _start_timer must invoke the callback."""
+    """The timer started by _start_timer must invoke the callback."""
     called = []
     code, _ = _room_with_n_players(2)
-    gl = game._start_timer(code, 0.01, lambda: called.append(True), MagicMock())
-    gl.join(timeout=2.0)
+    timer = game._start_timer(code, 0.01, lambda: called.append(True), MagicMock())
+    timer.join(timeout=2.0)
     assert called, "callback was never invoked"
 
 
-def test_start_timer_clears_greenlet_ref_on_room():
-    """After the sleep fires, timer_greenlet on the room must be set to None."""
+def test_start_timer_registers_itself_on_room():
+    """_start_timer must install itself as the room's active timer."""
     code, _ = _room_with_n_players(2)
-    rooms[code]["timer_greenlet"] = "sentinel"
-    gl = game._start_timer(code, 0.01, lambda: None, MagicMock())
-    gl.join(timeout=2.0)
-    assert rooms[code]["timer_greenlet"] is None
+    timer = game._start_timer(code, 5, lambda: None, MagicMock())
+    assert rooms[code]["timer"] is timer
+    game.cancel_timer(rooms[code])
+
+
+def test_start_timer_clears_timer_ref_on_room():
+    """After the timer fires, the room's timer ref must be set to None."""
+    code, _ = _room_with_n_players(2)
+    timer = game._start_timer(code, 0.01, lambda: None, MagicMock())
+    timer.join(timeout=2.0)
+    assert rooms[code]["timer"] is None
 
 
 # ---------------------------------------------------------------------------
@@ -1168,7 +1209,7 @@ def test_start_timer_clears_greenlet_ref_on_room():
 
 def test_extend_timer_returns_false_for_unknown_room():
     mock_io = _mock_socketio()
-    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+    with patch("game._start_timer", return_value=MagicMock()):
         assert game.extend_timer("ZZZZ", mock_io) is False
 
 
@@ -1176,14 +1217,14 @@ def test_extend_timer_returns_false_for_non_submitting_state():
     code, _ = _room_with_n_players(2)
     rooms[code]["state"] = "voting"
     mock_io = _mock_socketio()
-    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+    with patch("game._start_timer", return_value=MagicMock()):
         assert game.extend_timer(code, mock_io) is False
 
 
 def test_extend_timer_returns_true_for_submitting_room():
     code, _ = _room_in_submitting()
     mock_io = _mock_socketio()
-    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+    with patch("game._start_timer", return_value=MagicMock()):
         assert game.extend_timer(code, mock_io) is True
 
 
@@ -1193,29 +1234,29 @@ def test_extend_timer_extends_timer_end_by_extend_amount():
     original_end = _time.time() + 60
     rooms[code]["timer_end"] = original_end
     mock_io = _mock_socketio()
-    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+    with patch("game._start_timer", return_value=MagicMock()):
         game.extend_timer(code, mock_io)
     # new_end ≈ original_end + EXTEND_AMOUNT (within 0.5s of execution time)
     delta = rooms[code]["timer_end"] - original_end
     assert abs(delta - game.EXTEND_AMOUNT) < 0.5
 
 
-def test_extend_timer_replaces_timer_greenlet():
+def test_extend_timer_replaces_timer():
     code, _ = _room_in_submitting()
-    old_gl = MagicMock(dead=False)
-    rooms[code]["timer_greenlet"] = old_gl
+    old_timer = MagicMock()
+    rooms[code]["timer"] = old_timer
     mock_io = _mock_socketio()
-    new_gl = MagicMock(dead=False)
-    with patch("game._start_timer", return_value=new_gl):
+    new_timer = MagicMock()
+    with patch("game._start_timer", return_value=new_timer):
         game.extend_timer(code, mock_io)
-    old_gl.kill.assert_called_once()
-    assert rooms[code]["timer_greenlet"] is new_gl
+    old_timer.cancel.assert_called_once()
+    assert rooms[code]["timer"] is new_timer
 
 
 def test_extend_timer_broadcasts_game_state():
     code, _ = _room_in_submitting()
     mock_io = _mock_socketio()
-    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+    with patch("game._start_timer", return_value=MagicMock()):
         game.extend_timer(code, mock_io)
     mock_io.emit.assert_called_once_with("game:state", mock_io.emit.call_args[0][1], to=code)
 

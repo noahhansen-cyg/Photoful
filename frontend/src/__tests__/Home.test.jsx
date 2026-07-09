@@ -31,7 +31,7 @@ beforeEach(() => {
 describe("Home rendering", () => {
   it("shows the game title", () => {
     renderHome();
-    expect(screen.getByText(/photo quiplash/i)).toBeInTheDocument();
+    expect(screen.getByText(/photoful/i)).toBeInTheDocument();
   });
 
   it("shows a Create Room button", () => {
