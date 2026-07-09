@@ -158,7 +158,7 @@ Override the bot count with `bots=N` (max 8): `make devtest bots=5`.
 
 `make test-binary` builds the PyInstaller bundle and runs `backend/tests_e2e/` against the actual executable: it spawns the binary, verifies the embedded React app is served, and plays a complete 4-player game (both photo rounds, the caption round, restart) over real HTTP + Socket.IO connections — the same transports phones use. Game timers run at 5x speed via `PHOTOFUL_TIMER_SCALE`, so the whole suite takes under a minute after the build.
 
-The same suite runs in CI on Linux and macOS on every push and pull request (`.github/workflows/build.yml`), so packaging breakage — a missing hidden import, an asset that didn't make it into the bundle — is caught before merge.
+The same suite runs in CI on Linux, macOS, and Windows on every push and pull request (`.github/workflows/build.yml`), so packaging breakage — a missing hidden import, an asset that didn't make it into the bundle — is caught on every shipping platform before merge.
 
 ```bash
 make test-binary                              # rebuild bundle + run suite
