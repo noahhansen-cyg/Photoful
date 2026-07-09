@@ -4,7 +4,7 @@ name: Binary E2E
 # actual binary (backend/tests_e2e/): spawns the executable and plays a full
 # multiplayer game over real HTTP + Socket.IO. This catches what unit tests
 # cannot — hidden-import failures, missing bundled assets, transport issues —
-# on both Linux and macOS (PyInstaller output is platform-specific).
+# on all three platforms (PyInstaller output is platform-specific).
 on:
   push:
     branches: [main, development]
@@ -17,7 +17,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 25
 
@@ -52,6 +52,7 @@ jobs:
         run: npm run build
 
       - name: Verify frontend dist
+        shell: bash
         run: test -f frontend/dist/index.html
 
       - name: Bundle backend with PyInstaller
