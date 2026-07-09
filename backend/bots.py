@@ -269,7 +269,12 @@ def main():
     parser.add_argument("room_code", nargs="?", help="Existing room code to join (omit to create a new room)")
     parser.add_argument("--count", type=int, default=3, metavar="N",
                         help="Number of bots to spawn (1–8, default 3)")
+    parser.add_argument("--tv-base", default="http://localhost:5173", metavar="URL",
+                        help="Base URL for the printed TV link (default: Vite dev server; "
+                             "use http://localhost:5000 when the packaged binary serves the frontend)")
     args = parser.parse_args()
+
+    tv_base = args.tv_base.rstrip("/")
 
     count = max(1, min(args.count, MAX_BOTS))
     if count != args.count:
@@ -289,7 +294,7 @@ def main():
 
         code = resp.json()["room_code"]
         print(f"\nCreated room:  {code}")
-        print(f"Open TV at:    http://localhost:5173/room/{code}/tv\n")
+        print(f"Open TV at:    {tv_base}/room/{code}/tv\n")
 
     bots = [Bot(BOT_NAMES[i], "player", code) for i in range(count)]
 
@@ -300,7 +305,7 @@ def main():
     print(f"All {count} bots connected. Join as Host on your phone and start the game.")
     print(f"\n{'─'*48}")
     print(f"  Room code : {code}")
-    print(f"  TV URL    : http://localhost:5173/room/{code}/tv")
+    print(f"  TV URL    : {tv_base}/room/{code}/tv")
     print(f"{'─'*48}\n")
 
     try:
