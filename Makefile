@@ -1,4 +1,4 @@
-.PHONY: dev devtest stop test test-backend test-frontend install \
+.PHONY: dev devtest packagetest stop test test-backend test-frontend install \
         build-frontend build-backend build-electron package package-dir
 
 # Start both servers. Ctrl+C stops everything cleanly.
@@ -22,6 +22,28 @@ devtest:
 	  (cd backend && python app.py) & \
 	  (cd frontend && npm run dev) & \
 	  (sleep 3 && cd backend && python bots.py --count $(bots)) & \
+	  wait
+
+# Path to the PyInstaller server executable produced by build-backend / package
+# (onedir bundle — the executable lives inside the dist/photoful-server/ folder)
+SERVER_BIN := backend/dist/photoful-server/photoful-server
+
+# Run the PACKAGED server binary + bot players, like devtest but against the
+# real production build (frontend is served by the binary on :5000).
+# Requires a prior `make build-backend` (or `make package`).
+# Override the number of bots with bots=N (max 8): make packagetest bots=5
+# Ctrl+C stops everything.
+packagetest:
+	@test -x "$(SERVER_BIN)" || { \
+	  echo "Packaged server not found at $(SERVER_BIN)."; \
+	  echo "Run 'make build-backend' (or 'make package') first."; \
+	  exit 1; }
+	@echo "Starting packaged server ($(SERVER_BIN)) and $(bots) bot players..."
+	@echo "(Bots will create a room and print the TV URL once the server is up)"
+	@trap 'lsof -ti:5000 | xargs kill -9 2>/dev/null; kill 0' INT; \
+	  PORT=5000 ./$(SERVER_BIN) & \
+	  (until curl -sf http://localhost:5000/healthz >/dev/null 2>&1; do sleep 0.5; done; \
+	   cd backend && python bots.py --count $(bots) --tv-base http://localhost:5000) & \
 	  wait
 
 # Kill anything still holding the ports

@@ -83,6 +83,7 @@ make dev       # start backend + frontend together
 | `make build-electron` | Wrap the server bundle in an Electron installer |
 | `make package-dir` | Fast unpacked desktop build (no installer) for local testing |
 | `make package` | Full pipeline — outputs installer to `dist/` |
+| `make packagetest` | Run the packaged server binary + 3 bot players for solo testing |
 
 ---
 
@@ -147,6 +148,21 @@ make devtest
 ```
 
 Bots vote with a 5–10s random delay so you have time to vote first.
+
+Override the bot count with `bots=N` (max 8): `make devtest bots=5`.
+
+### Testing the packaged build
+
+`make packagetest` is the same workflow but runs the PyInstaller server bundle (`backend/dist/photoful-server/`) instead of the dev servers — the production frontend is served by the binary itself on port 5000, so the printed TV URL points there.
+
+```bash
+make build-backend   # or make package — either produces the binary
+make packagetest     # or: make packagetest bots=5
+# → open the printed TV URL (http://localhost:5000/room/CODE/tv)
+# → navigate to http://localhost:5000 on your phone, enter the code, join as Host
+```
+
+Note: uploads in the packaged build go to the user-data directory (e.g. `~/Library/Application Support/Photoful/uploads` on macOS), not `backend/uploads/`.
 
 ---
 
