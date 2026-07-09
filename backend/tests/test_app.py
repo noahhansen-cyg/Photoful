@@ -298,13 +298,3 @@ def test_get_local_ip_falls_back_to_localhost_on_exception():
             result = app_module.get_local_ip()
     assert result == "localhost"
 
-
-# ---------------------------------------------------------------------------
-# GET /api/server-info — APP_HOST env override
-# ---------------------------------------------------------------------------
-
-def test_server_info_uses_app_host_env_when_set(client):
-    """APP_HOST env var overrides the network probe result."""
-    with patch.dict(os.environ, {"APP_HOST": "192.168.1.42"}):
-        response = client.get("/api/server-info")
-    assert response.get_json()["local_ip"] == "192.168.1.42"

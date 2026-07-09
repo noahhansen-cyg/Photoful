@@ -17,8 +17,8 @@ The server owns all state. Phones and TV are just views that re-render on every 
 ┌─────────────────────────────────────────┐
 │              Game Server                │
 │  Flask + Flask-SocketIO (threading +    │
-│  simple-websocket — identical in dev,   │
-│  cloud, and the packaged desktop app)   │
+│  simple-websocket — identical in dev    │
+│  and the packaged desktop app)          │
 │  - Room management (in-memory)          │
 │  - Game state machine                   │
 │  - WebSocket hub                        │
@@ -251,8 +251,8 @@ Photos are large — they go over HTTP, not WebSocket.
 
 ## Timer System
 
-Timers use plain `threading.Timer`, so the exact same code runs in dev, in the
-cloud deploy, and inside the PyInstaller binary — no gevent anywhere:
+Timers use plain `threading.Timer`, so the exact same code runs in dev and
+inside the PyInstaller binary — no gevent anywhere:
 
 ```python
 def _start_timer(room_code, seconds, callback, socketio):
