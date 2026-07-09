@@ -53,18 +53,19 @@ jobs:
 
       - name: Bundle backend with PyInstaller
         working-directory: backend
-        run: pyinstaller quiplash.spec --distpath dist --workpath build
+        run: pyinstaller photoful.spec --distpath dist --workpath build
 
+      # Onedir bundle: the executable lives inside the photoful-server folder.
       - name: Verify binary exists
-        run: test -f backend/dist/quiplash-server
+        run: test -f backend/dist/photoful-server/photoful-server
 
       # Start the server in the background and poll /healthz.
       # This catches hidden-import failures and missing runtime files that
       # only surface when the binary actually executes.
       - name: Start server and probe /healthz
         run: |
-          chmod +x backend/dist/quiplash-server
-          backend/dist/quiplash-server &
+          chmod +x backend/dist/photoful-server/photoful-server
+          backend/dist/photoful-server/photoful-server &
           SERVER_PID=$!
           echo "Server PID: $SERVER_PID"
 

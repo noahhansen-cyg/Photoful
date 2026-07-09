@@ -1,15 +1,7 @@
 import sys
 import os
 
-# ---------------------------------------------------------------------------
-# Async mode — use threading in the packaged binary to avoid gevent+PyInstaller
-# incompatibilities; use gevent in development (unchanged behaviour).
-# ---------------------------------------------------------------------------
 _FROZEN = getattr(sys, "frozen", False)
-ASYNC_MODE = "threading" if _FROZEN else os.environ.get("ASYNC_MODE", "gevent")
-if ASYNC_MODE == "gevent":
-    import gevent.monkey
-    gevent.monkey.patch_all()
 
 import uuid
 import random
@@ -39,7 +31,13 @@ app = Flask(__name__)
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-secret-change-in-prod")
 
 CORS(app, resources={r"/api/*": {"origins": "*"}})
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode=ASYNC_MODE)
+
+# One async mode everywhere — dev, cloud, and the packaged binary all run
+# threading mode with real WebSocket support via simple-websocket. This keeps
+# the desktop build byte-for-byte identical to the web app's runtime path.
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
+
+PORT = int(os.environ.get("PORT", "5000"))
 
 
 def _get_upload_dir():
@@ -50,11 +48,11 @@ def _get_upload_dir():
     """
     if _FROZEN:
         if sys.platform == "darwin":
-            base = os.path.expanduser("~/Library/Application Support/PhotoQuiplash")
+            base = os.path.expanduser("~/Library/Application Support/Photoful")
         elif sys.platform == "win32":
-            base = os.path.join(os.environ.get("APPDATA", "~"), "PhotoQuiplash")
+            base = os.path.join(os.environ.get("APPDATA", "~"), "Photoful")
         else:
-            base = os.path.expanduser("~/.photoquiplash")
+            base = os.path.expanduser("~/.photoful")
         d = os.path.join(base, "uploads")
     else:
         d = os.path.join(os.path.dirname(__file__), "uploads")
@@ -66,9 +64,19 @@ UPLOADS_DIR = _get_upload_dir()
 
 
 def _get_frontend_dist():
-    """Return the path to the built React app, or None in dev mode."""
+    """Return the path to the built React app, or None if it isn't built.
+
+    The same SPA-serving code path runs everywhere: the PyInstaller bundle
+    ships it under sys._MEIPASS, while dev/Docker use ../frontend/dist when
+    a build exists (in dev you normally use the Vite server on :5173).
+    """
     if _FROZEN:
         return os.path.join(sys._MEIPASS, "frontend_dist")
+    local = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
+    )
+    if os.path.exists(os.path.join(local, "index.html")):
+        return local
     return None
 
 
@@ -297,8 +305,10 @@ def handle_submit_photo(data):
 
     if game.all_prompts_submitted(room["prompts"]):
         log.info("room=%-4s event=all_submitted — advancing early", code)
-        game.cancel_timer(room)
-        game.advance_state(code, socketio)
+        # voting_intro included: a late upload that completes the set during
+        # the intro skips the rest of it and jumps straight to voting.
+        game.advance_now(code, socketio,
+                         expected_state=("submitting", "voting_intro"))
 
 
 @socketio.on("submit:vote")
@@ -331,8 +341,7 @@ def handle_vote(data):
     connected = [p for p in room["players"] if p["is_connected"]]
     if prompt and game.all_voted(prompt, connected):
         log.info("room=%-4s event=all_voted — advancing early", code)
-        game.cancel_timer(room)
-        game.advance_state(code, socketio)
+        game.advance_now(code, socketio, expected_state="voting")
 
 
 @socketio.on("submit:caption")
@@ -363,8 +372,7 @@ def handle_submit_caption(data):
     connected = [p for p in room["players"] if p["is_connected"]]
     if cp and game.all_captions_submitted(cp, connected):
         log.info("room=%-4s event=all_captions_submitted — advancing early", code)
-        game.cancel_timer(room)
-        game.advance_state(code, socketio)
+        game.advance_now(code, socketio, expected_state="captioning")
 
 
 @socketio.on("submit:caption_vote")
@@ -396,8 +404,7 @@ def handle_caption_vote(data):
     connected = [p for p in room["players"] if p["is_connected"]]
     if cp and game.all_voted(cp, connected):
         log.info("room=%-4s event=all_caption_votes — advancing early", code)
-        game.cancel_timer(room)
-        game.advance_state(code, socketio)
+        game.advance_now(code, socketio, expected_state="caption_voting")
 
 
 @socketio.on("host:restart")
@@ -479,15 +486,16 @@ if _FRONTEND_DIST:
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    log.info("Starting Photo Quiplash server on :5000")
-    # In the packaged binary (threading mode) Werkzeug raises an error unless
-    # allow_unsafe_werkzeug=True is passed and debug is off.  In dev, gevent
-    # replaces the Werkzeug server entirely so debug=True is fine.
+    log.info("Starting Photoful server on http://0.0.0.0:%d (LAN: http://%s:%d)",
+             PORT, get_local_ip(), PORT)
+    # Identical invocation in dev and in the packaged binary. Werkzeug is a
+    # perfectly good server for a LAN party game; allow_unsafe_werkzeug just
+    # acknowledges we are using it outside `flask run`.
     socketio.run(
         app,
         host="0.0.0.0",
-        port=5000,
-        debug=not _FROZEN,
+        port=PORT,
+        debug=False,
         use_reloader=False,
-        allow_unsafe_werkzeug=_FROZEN,
+        allow_unsafe_werkzeug=True,
     )

@@ -1,4 +1,4 @@
-# Frontend — Photo Quiplash
+# Frontend — Photoful
 
 React 19 + Vite app. Runs on `http://localhost:5173` in development; served directly by the Flask backend in the packaged executable.
 

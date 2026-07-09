@@ -1,5 +1,5 @@
 .PHONY: dev devtest stop test test-backend test-frontend install \
-        build-frontend build-backend build-electron package
+        build-frontend build-backend build-electron package package-dir
 
 # Start both servers. Ctrl+C stops everything cleanly.
 dev:
@@ -59,23 +59,32 @@ build-frontend:
 	@echo "Building React frontend..."
 	cd frontend && npm run build
 
-# 2. Bundle the Flask backend + built frontend into a single binary via PyInstaller.
-#    Requires: pip install pyinstaller  (done automatically below)
-#    Output:   backend/dist/quiplash-server  (or quiplash-server.exe on Windows)
+# 2. Bundle the Flask backend + built frontend into a onedir bundle via
+#    PyInstaller (same threading/simple-websocket runtime as the web app).
+#    Output:   backend/dist/photoful-server/  (folder with the executable inside)
 build-backend: build-frontend
 	@echo "Installing PyInstaller..."
 	pip install pyinstaller
 	@echo "Bundling backend with PyInstaller..."
-	cd backend && pyinstaller quiplash.spec --distpath dist --workpath build
+	rm -rf backend/dist backend/build
+	cd backend && pyinstaller photoful.spec --distpath dist --workpath build
 
-# 3. Package the Electron wrapper + backend binary into a platform installer.
-#    Output:  dist/Photo Quiplash.dmg   (macOS)
-#             dist/Photo Quiplash Setup.exe  (Windows)
+# 3. Package the Electron wrapper + backend bundle into a platform installer.
+#    Output:  dist/Photoful-<ver>.dmg / .zip        (macOS)
+#             dist/Photoful Setup <ver>.exe / .zip  (Windows)
+#             dist/Photoful-<ver>.AppImage / .tar.gz (Linux)
+#    The unpacked builds (dist/mac*, dist/win-unpacked, dist/linux-unpacked)
+#    are what you upload to Steam depots.
 build-electron: build-backend
 	@echo "Installing Electron dependencies..."
 	cd electron && npm install
 	@echo "Building Electron installer..."
 	cd electron && npm run package
+
+# Quick unpacked build (no installer) — fastest way to test the desktop app:
+#   dist/mac-arm64/Photoful.app, dist/win-unpacked/, dist/linux-unpacked/
+package-dir: build-backend
+	cd electron && npm install && npm run package:dir
 
 # Convenience target: run the full packaging pipeline.
 package: build-electron

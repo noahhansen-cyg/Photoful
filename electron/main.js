@@ -1,70 +1,104 @@
-const { app, BrowserWindow } = require("electron");
-const { spawn } = require("child_process");
+const { app, BrowserWindow, dialog } = require("electron");
+const { spawn, spawnSync } = require("child_process");
 const path = require("path");
 const http = require("http");
+const net = require("net");
 
-const SERVER_PORT = 5000;
-const SERVER_URL  = `http://localhost:${SERVER_PORT}`;
-
-let mainWindow   = null;
+let mainWindow    = null;
 let serverProcess = null;
+let serverPort    = null;
+let quitting      = false;
 
-// ---------------------------------------------------------------------------
-// Server binary path
-// ---------------------------------------------------------------------------
-
-function getServerBinary() {
-  if (!app.isPackaged) {
-    // Development: server must be started separately (make dev).
-    return null;
-  }
-  const exe = process.platform === "win32"
-    ? "quiplash-server.exe"
-    : "quiplash-server";
-  return path.join(process.resourcesPath, "server", exe);
+// Ring buffer of recent server output, shown in the error dialog if the
+// server dies so users can report something actionable.
+const serverLog = [];
+function logServer(chunk) {
+  const line = chunk.toString();
+  process.stdout.write(`[server] ${line}`);
+  serverLog.push(line);
+  while (serverLog.length > 50) serverLog.shift();
 }
 
 // ---------------------------------------------------------------------------
-// Start the bundled Flask server
+// Server binary (PyInstaller onedir bundle shipped as an extraResource)
 // ---------------------------------------------------------------------------
 
-function startServer() {
-  const bin = getServerBinary();
-  if (!bin) {
-    console.log("[electron] Dev mode — expecting server already running on :5000");
-    return;
-  }
+function getServerBinary() {
+  const exe = process.platform === "win32"
+    ? "photoful-server.exe"
+    : "photoful-server";
+  return path.join(process.resourcesPath, "server", exe);
+}
 
-  console.log("[electron] Spawning server:", bin);
+// Ask the OS for a free port instead of hardcoding one. Port 5000 in
+// particular is taken by AirPlay Receiver on modern macOS.
+function findFreePort() {
+  return new Promise((resolve, reject) => {
+    const srv = net.createServer();
+    srv.unref();
+    srv.on("error", reject);
+    srv.listen(0, () => {
+      const { port } = srv.address();
+      srv.close(() => resolve(port));
+    });
+  });
+}
+
+function startServer(port) {
+  const bin = getServerBinary();
+  console.log(`[electron] Spawning server on port ${port}:`, bin);
+
   serverProcess = spawn(bin, [], {
-    env: { ...process.env, ASYNC_MODE: "threading" },
-    // On macOS/Linux keep the console window hidden; Windows needs this too.
+    env: { ...process.env, PORT: String(port) },
     windowsHide: true,
   });
 
-  serverProcess.stdout.on("data", (d) => process.stdout.write(`[server] ${d}`));
-  serverProcess.stderr.on("data", (d) => process.stderr.write(`[server] ${d}`));
+  serverProcess.stdout.on("data", logServer);
+  serverProcess.stderr.on("data", logServer);
 
   serverProcess.on("exit", (code) => {
     console.log(`[electron] Server exited with code ${code}`);
     serverProcess = null;
+    if (!quitting) {
+      dialog.showErrorBox(
+        "Photoful — server stopped",
+        `The game server exited unexpectedly (code ${code}).\n\nRecent log:\n` +
+          serverLog.slice(-15).join("")
+      );
+      app.quit();
+    }
   });
+
+  serverProcess.on("error", (err) => {
+    console.error("[electron] Failed to spawn server:", err.message);
+  });
+}
+
+function stopServer() {
+  if (!serverProcess) return;
+  console.log("[electron] Stopping server process");
+  const proc = serverProcess;
+  serverProcess = null;
+  if (process.platform === "win32") {
+    // Kill the whole process tree; a bare .kill() can orphan children.
+    spawnSync("taskkill", ["/pid", String(proc.pid), "/T", "/F"]);
+  } else {
+    proc.kill();
+  }
 }
 
 // ---------------------------------------------------------------------------
 // Poll /healthz until the server is ready
 // ---------------------------------------------------------------------------
 
-function waitForServer(retries = 40, intervalMs = 500) {
+function waitForServer(url, retries = 60, intervalMs = 500) {
   return new Promise((resolve, reject) => {
     const attempt = () => {
       http
-        .get(`${SERVER_URL}/healthz`, (res) => {
-          if (res.statusCode === 200) {
-            resolve();
-          } else {
-            retry();
-          }
+        .get(`${url}/healthz`, (res) => {
+          res.resume();
+          if (res.statusCode === 200) resolve();
+          else retry();
         })
         .on("error", retry);
     };
@@ -82,16 +116,40 @@ function waitForServer(retries = 40, intervalMs = 500) {
 }
 
 // ---------------------------------------------------------------------------
-// Create the main window
+// Main window
 // ---------------------------------------------------------------------------
 
-async function createWindow() {
-  startServer();
+async function resolveAppUrl() {
+  if (!app.isPackaged) {
+    // Development: use the live stack from `make dev` (Vite on :5173,
+    // which proxies to Flask), or whatever ELECTRON_START_URL points at.
+    return process.env.ELECTRON_START_URL || "http://localhost:5173";
+  }
 
+  // Reuse the already-running server if the window is being re-created
+  // (macOS dock activate).
+  if (serverProcess && serverPort) {
+    return `http://127.0.0.1:${serverPort}`;
+  }
+
+  serverPort = await findFreePort();
+  const url = `http://127.0.0.1:${serverPort}`;
+  startServer(serverPort);
+  await waitForServer(url);
+  return url;
+}
+
+async function createWindow() {
+  let url;
   try {
-    await waitForServer();
+    url = await resolveAppUrl();
   } catch (err) {
-    console.error("[electron] Could not connect to server:", err.message);
+    dialog.showErrorBox(
+      "Photoful — could not start",
+      `${err.message}\n\nRecent log:\n${serverLog.slice(-15).join("")}`
+    );
+    quitting = true;
+    stopServer();
     app.quit();
     return;
   }
@@ -99,16 +157,16 @@ async function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 720,
-    title: "Photo Quiplash",
+    title: "Photoful",
+    fullscreenable: true,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
     },
   });
 
-  mainWindow.loadURL(SERVER_URL);
+  mainWindow.loadURL(url);
 
-  // Allow fullscreen toggle with F11 (default Electron behaviour handles it).
   mainWindow.on("closed", () => {
     mainWindow = null;
   });
@@ -118,18 +176,29 @@ async function createWindow() {
 // App lifecycle
 // ---------------------------------------------------------------------------
 
-app.whenReady().then(createWindow);
-
-app.on("window-all-closed", () => {
-  if (serverProcess) {
-    console.log("[electron] Killing server process");
-    serverProcess.kill();
-  }
-  // On macOS it's conventional to quit when all windows are closed.
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) {
   app.quit();
-});
+} else {
+  app.on("second-instance", () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
+  });
 
-app.on("activate", () => {
-  // macOS: re-open window when dock icon is clicked with no windows open.
-  if (mainWindow === null) createWindow();
-});
+  app.whenReady().then(createWindow);
+
+  app.on("before-quit", () => {
+    quitting = true;
+    stopServer();
+  });
+
+  app.on("window-all-closed", () => {
+    app.quit();
+  });
+
+  app.on("activate", () => {
+    if (mainWindow === null && !quitting) createWindow();
+  });
+}

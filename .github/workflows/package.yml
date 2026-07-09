@@ -1,0 +1,76 @@
+name: Package desktop app
+
+# Builds the desktop app for macOS, Windows, and Linux.
+# PyInstaller cannot cross-compile, so each OS builds its own bundle.
+#
+# Trigger manually from the Actions tab, or push a tag like v0.2.0.
+# Artifacts contain both the installers (dmg/nsis/AppImage) and the
+# unpacked directories used for Steam depot uploads.
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build frontend
+        shell: bash
+        run: |
+          cd frontend
+          npm ci
+          npm run build
+
+      - name: Build server bundle (PyInstaller)
+        shell: bash
+        run: |
+          pip install -r backend/requirements.txt pyinstaller
+          cd backend
+          pyinstaller photoful.spec --distpath dist --workpath build
+
+      - name: Build Electron app
+        shell: bash
+        run: |
+          cd electron
+          npm ci
+          npx electron-builder --publish never
+
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: photoful-${{ matrix.os }}
+          path: |
+            dist/*.dmg
+            dist/*.zip
+            dist/*.exe
+            dist/*.AppImage
+            dist/*.tar.gz
+          if-no-files-found: error
+
+      - name: Upload unpacked build (for Steam depots)
+        uses: actions/upload-artifact@v4
+        with:
+          name: photoful-steam-${{ matrix.os }}
+          path: |
+            dist/mac/
+            dist/mac-arm64/
+            dist/win-unpacked/
+            dist/linux-unpacked/
+          if-no-files-found: error

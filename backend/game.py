@@ -6,11 +6,16 @@ No Flask/SocketIO imports here so everything is easily unit-testable.
 import json
 import math
 import random
+import threading
 import uuid
 import time
 import os
 
 import rooms as room_store
+
+# Serializes state transitions so a timer firing can never race an
+# "everyone acted early" advance coming from a socket handler.
+_lock = threading.RLock()
 
 PROMPTS_PATH = os.path.join(os.path.dirname(__file__), "prompts.json")
 SUBMIT_TIMEOUT = 120  # seconds players have to submit photos for ALL their prompts
@@ -205,11 +210,38 @@ def apply_scores(room_code, prompt):
     return deltas
 
 
+def advance_now(room_code, socketio, expected_state=None):
+    """
+    Cancel the running timer and advance immediately, as one atomic step.
+    Called from socket handlers when all players have acted early.
+
+    expected_state (a state name or tuple of names) guards against concurrent
+    handlers double-advancing: when the last two players act at the same time,
+    both handlers can see the phase as complete, but only the first one finds
+    the room still in an expected state — the second becomes a no-op.
+    """
+    if isinstance(expected_state, str):
+        expected_state = (expected_state,)
+    with _lock:
+        room = room_store.get_room(room_code)
+        if not room:
+            return
+        if expected_state is not None and room["state"] not in expected_state:
+            return
+        cancel_timer(room)
+        advance_state(room_code, socketio)
+
+
 def advance_state(room_code, socketio):
     """
     Move the room to the next state in the game loop and broadcast game:state.
     Called when a timer fires or all players have acted early.
     """
+    with _lock:
+        _advance_state(room_code, socketio)
+
+
+def _advance_state(room_code, socketio):
     room = room_store.get_room(room_code)
     if not room:
         return
@@ -224,14 +256,14 @@ def advance_state(room_code, socketio):
         room["current_prompt_idx"] = 0
         room["state"]    = "voting_intro"
         room["timer_end"] = time.time() + VOTING_INTRO_TIMEOUT
-        room["timer_greenlet"] = _start_timer(
+        room["timer"] = _start_timer(
             room_code, VOTING_INTRO_TIMEOUT, lambda: advance_state(room_code, socketio), socketio
         )
 
     elif state == "voting_intro":
         room["state"]    = "voting"
         room["timer_end"] = time.time() + VOTE_TIMEOUT
-        room["timer_greenlet"] = _start_timer(
+        room["timer"] = _start_timer(
             room_code, VOTE_TIMEOUT, lambda: advance_state(room_code, socketio), socketio
         )
 
@@ -241,7 +273,7 @@ def advance_state(room_code, socketio):
             prompt["score_deltas"] = score_deltas
         room["state"]    = "scores"
         room["timer_end"] = time.time() + SCORES_TIMEOUT
-        room["timer_greenlet"] = _start_timer(
+        room["timer"] = _start_timer(
             room_code, SCORES_TIMEOUT, lambda: advance_state(room_code, socketio), socketio
         )
 
@@ -252,7 +284,7 @@ def advance_state(room_code, socketio):
             room["current_prompt_idx"] = next_idx
             room["state"]    = "voting"
             room["timer_end"] = time.time() + VOTE_TIMEOUT
-            room["timer_greenlet"] = _start_timer(
+            room["timer"] = _start_timer(
                 room_code, VOTE_TIMEOUT, lambda: advance_state(room_code, socketio), socketio
             )
         elif room.get("round", 1) < TOTAL_ROUNDS:
@@ -263,7 +295,7 @@ def advance_state(room_code, socketio):
                 p["score_deltas"] = {}
             room["state"]    = "round_intro"
             room["timer_end"] = time.time() + ROUND_INTRO_TIMEOUT
-            room["timer_greenlet"] = _start_timer(
+            room["timer"] = _start_timer(
                 room_code, ROUND_INTRO_TIMEOUT, lambda: advance_state(room_code, socketio), socketio
             )
         else:
@@ -275,7 +307,7 @@ def advance_state(room_code, socketio):
                 room["caption_prompt"] = create_caption_prompt(players, best)
                 room["state"]    = "caption_intro"
                 room["timer_end"] = time.time() + CAPTION_INTRO_TIMEOUT
-                room["timer_greenlet"] = _start_timer(
+                room["timer"] = _start_timer(
                     room_code, CAPTION_INTRO_TIMEOUT, lambda: advance_state(room_code, socketio), socketio
                 )
             else:
@@ -290,21 +322,21 @@ def advance_state(room_code, socketio):
         room["current_prompt_idx"] = 0
         room["state"]    = "submitting"
         room["timer_end"] = time.time() + SUBMIT_TIMEOUT
-        room["timer_greenlet"] = _start_timer(
+        room["timer"] = _start_timer(
             room_code, SUBMIT_TIMEOUT, lambda: advance_state(room_code, socketio), socketio
         )
 
     elif state == "caption_intro":
         room["state"]    = "captioning"
         room["timer_end"] = time.time() + CAPTION_TIMEOUT
-        room["timer_greenlet"] = _start_timer(
+        room["timer"] = _start_timer(
             room_code, CAPTION_TIMEOUT, lambda: advance_state(room_code, socketio), socketio
         )
 
     elif state == "captioning":
         room["state"]    = "caption_voting"
         room["timer_end"] = time.time() + VOTE_TIMEOUT
-        room["timer_greenlet"] = _start_timer(
+        room["timer"] = _start_timer(
             room_code, VOTE_TIMEOUT, lambda: advance_state(room_code, socketio), socketio
         )
 
@@ -318,7 +350,7 @@ def advance_state(room_code, socketio):
                 player["score"] = player.get("score", 0) + deltas.get(player["id"], 0)
         room["state"]    = "caption_scores"
         room["timer_end"] = time.time() + SCORES_TIMEOUT
-        room["timer_greenlet"] = _start_timer(
+        room["timer"] = _start_timer(
             room_code, SCORES_TIMEOUT, lambda: advance_state(room_code, socketio), socketio
         )
 
@@ -331,25 +363,26 @@ def advance_state(room_code, socketio):
 
 def start_game(room_code, socketio):
     """Called when the host fires host:start. Assigns prompts and begins round."""
-    room = room_store.get_room(room_code)
-    if not room:
-        return False
+    with _lock:
+        room = room_store.get_room(room_code)
+        if not room:
+            return False
 
-    players = [p for p in room["players"]
-               if p["is_connected"] and p["role"] in ("player", "host")]
-    if len(players) < 2:
-        return False
+        players = [p for p in room["players"]
+                   if p["is_connected"] and p["role"] in ("player", "host")]
+        if len(players) < 2:
+            return False
 
-    room["prompts"]             = assign_prompts(players)
-    room["current_prompt_idx"]  = 0
-    room["state"]               = "submitting"
-    room["timer_end"]           = time.time() + SUBMIT_TIMEOUT
-    room["timer_greenlet"]      = _start_timer(
-        room_code, SUBMIT_TIMEOUT, lambda: advance_state(room_code, socketio), socketio
-    )
+        room["prompts"]             = assign_prompts(players)
+        room["current_prompt_idx"]  = 0
+        room["state"]               = "submitting"
+        room["timer_end"]           = time.time() + SUBMIT_TIMEOUT
+        room["timer"]               = _start_timer(
+            room_code, SUBMIT_TIMEOUT, lambda: advance_state(room_code, socketio), socketio
+        )
 
-    socketio.emit("game:state", room_store.get_room_state(room_code), to=room_code)
-    return True
+        socketio.emit("game:state", room_store.get_room_state(room_code), to=room_code)
+        return True
 
 
 def extend_timer(room_code, socketio):
@@ -357,40 +390,53 @@ def extend_timer(room_code, socketio):
     Add EXTEND_AMOUNT seconds to the running submission timer.
     Only valid during the 'submitting' state.  Returns True on success.
     """
-    room = room_store.get_room(room_code)
-    if not room or room["state"] != "submitting":
-        return False
-    cancel_timer(room)
-    remaining  = max(0.0, (room.get("timer_end") or 0.0) - time.time())
-    new_delay  = remaining + EXTEND_AMOUNT
-    room["timer_end"]       = time.time() + new_delay
-    room["timer_greenlet"]  = _start_timer(
-        room_code, new_delay, lambda: advance_state(room_code, socketio), socketio
-    )
-    socketio.emit("game:state", room_store.get_room_state(room_code), to=room_code)
-    return True
+    with _lock:
+        room = room_store.get_room(room_code)
+        if not room or room["state"] != "submitting":
+            return False
+        cancel_timer(room)
+        remaining  = max(0.0, (room.get("timer_end") or 0.0) - time.time())
+        new_delay  = remaining + EXTEND_AMOUNT
+        room["timer_end"] = time.time() + new_delay
+        room["timer"]     = _start_timer(
+            room_code, new_delay, lambda: advance_state(room_code, socketio), socketio
+        )
+        socketio.emit("game:state", room_store.get_room_state(room_code), to=room_code)
+        return True
 
 
 def cancel_timer(room):
-    """Kill the running timer greenlet if one exists."""
-    gl = room.get("timer_greenlet")
-    if gl and not gl.dead:
-        gl.kill()
-    room["timer_greenlet"] = None
+    """Cancel the running phase timer if one exists."""
+    with _lock:
+        timer = room.get("timer")
+        if timer:
+            timer.cancel()
+        room["timer"] = None
 
 
 # ---------------------------------------------------------------------------
-# Internal helper — imported here to avoid circular import at module level
+# Phase timer — plain threading.Timer so the exact same code runs in dev,
+# in the cloud deploy, and in the packaged binary.
 # ---------------------------------------------------------------------------
 
 def _start_timer(room_code, seconds, callback, socketio):
-    import gevent
+    timer = None
 
-    def _run():
-        gevent.sleep(seconds)
+    def _fire():
+        with _lock:
+            room = room_store.get_room(room_code)
+            # A cancel() can lose the race with an already-firing Timer, so
+            # only proceed if we are still the room's active timer.
+            if not room or room.get("timer") is not timer:
+                return
+            room["timer"] = None
+            callback()
+
+    with _lock:
         room = room_store.get_room(room_code)
-        if room:
-            room["timer_greenlet"] = None
-        callback()
-
-    return gevent.spawn(_run)
+        timer = threading.Timer(seconds, _fire)
+        timer.daemon = True
+        if room is not None:
+            room["timer"] = timer
+        timer.start()
+    return timer
