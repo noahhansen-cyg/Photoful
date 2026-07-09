@@ -24,33 +24,44 @@ devtest:
 	  (sleep 3 && cd backend && python bots.py --count $(bots)) & \
 	  wait
 
-# Path to the PyInstaller server executable produced by build-backend / package
-# (onedir bundle — the executable lives inside the dist/photoful-server/ folder)
-SERVER_BIN := backend/dist/photoful-server/photoful-server
+# Port the packaged app's embedded server listens on during packagetest.
+# Fixed (instead of the app's usual random free port) so the bots can find it.
+port ?= 5017
 
-# Run the PACKAGED server binary + bot players, like devtest but against the
-# real production build (frontend is served by the binary on :5000).
-# Requires a prior `make build-backend` (or `make package`).
+# Full end-to-end test of the DESKTOP app (macOS): runs the complete `make
+# package` pipeline (dmg + unpacked .app in dist/), launches the actual
+# packaged application, then joins bot players to the room you create in it.
+#   1. The Photoful window opens at the main menu — click "Play".
+#   2. Type the room code shown on the TV screen at the prompt in this terminal.
+#   3. Bots join that room; claim Host from your phone/browser and start the game.
 # Override the number of bots with bots=N (max 8): make packagetest bots=5
-# Ctrl+C stops everything.
-packagetest:
-	@test -x "$(SERVER_BIN)" || { \
-	  echo "Packaged server not found at $(SERVER_BIN)."; \
-	  echo "Run 'make build-backend' (or 'make package') first."; \
-	  exit 1; }
-	@echo "Starting packaged server ($(SERVER_BIN)) and $(bots) bot players..."
-	@echo "(Bots will create a room and print the TV URL once the server is up)"
-	@trap 'lsof -ti:5000 | xargs kill -9 2>/dev/null; kill 0' INT; \
-	  PORT=5000 ./$(SERVER_BIN) & \
-	  (until curl -sf http://localhost:5000/healthz >/dev/null 2>&1; do sleep 0.5; done; \
-	   cd backend && python bots.py --count $(bots) --tv-base http://localhost:5000) & \
-	  wait
+# Ctrl+C stops the bots and quits the app.
+packagetest: package
+	@APP_BIN="$$(ls -d dist/mac*/Photoful.app 2>/dev/null | head -1)/Contents/MacOS/Photoful"; \
+	test -x "$$APP_BIN" || { \
+	  echo "Packaged app not found under dist/mac*/Photoful.app — did the build fail?"; \
+	  exit 1; }; \
+	echo ""; \
+	echo "Launching packaged app on port $(port): $$APP_BIN"; \
+	trap 'kill $$APP_PID 2>/dev/null; lsof -ti:$(port) | xargs kill -9 2>/dev/null' INT TERM EXIT; \
+	PHOTOFUL_PORT=$(port) "$$APP_BIN" & APP_PID=$$!; \
+	until curl -sf http://localhost:$(port)/healthz >/dev/null 2>&1; do \
+	  kill -0 $$APP_PID 2>/dev/null || { echo "App exited before its server came up."; exit 1; }; \
+	  sleep 0.5; \
+	done; \
+	echo ""; \
+	echo "Server is up. In the Photoful window, click Play to create a room."; \
+	printf "Enter the room code shown on the TV screen: "; \
+	read CODE; \
+	cd backend && PHOTOFUL_URL=http://localhost:$(port) \
+	  python bots.py "$$CODE" --count $(bots) --tv-base http://localhost:$(port)
 
 # Kill anything still holding the ports
 stop:
 	@echo "Stopping servers..."
 	@lsof -ti:5000 | xargs kill -9 2>/dev/null || true
 	@lsof -ti:5173 | xargs kill -9 2>/dev/null || true
+	@lsof -ti:$(port) | xargs kill -9 2>/dev/null || true
 	@echo "Done."
 
 # Install all dependencies (run once after cloning)
