@@ -42,6 +42,10 @@ jobs:
         working-directory: backend
         run: pip install -r requirements-dev.txt pyinstaller
 
+      # Headless browser for the TV-page E2E tests (tests_e2e/test_tv_browser.py)
+      - name: Install Playwright chromium
+        run: python -m playwright install --with-deps chromium
+
       - name: Install Node dependencies
         working-directory: frontend
         run: npm ci

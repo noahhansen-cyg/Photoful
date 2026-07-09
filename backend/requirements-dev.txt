@@ -3,3 +3,6 @@
 pytest
 python-socketio[client]
 websocket-client
+# Browser-level E2E (tests_e2e/test_tv_browser.py). After installing, fetch the
+# headless browser once with: python -m playwright install chromium
+playwright
