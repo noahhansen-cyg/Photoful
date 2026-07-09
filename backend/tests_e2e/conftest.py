@@ -122,3 +122,29 @@ def server(tmp_path_factory):
             proc.kill()
             proc.wait()
         log_file.close()
+
+
+@pytest.fixture(scope="session")
+def page():
+    """A headless-browser page for tests that exercise the bundled React SPA.
+
+    Skips (rather than fails) when playwright or its chromium download is
+    missing, so the HTTP/Socket.IO tests still run without a browser setup.
+    """
+    try:
+        from playwright.sync_api import sync_playwright, Error as PlaywrightError
+    except ImportError:
+        pytest.skip("playwright not installed — pip install -r requirements-dev.txt")
+
+    with sync_playwright() as pw:
+        try:
+            browser = pw.chromium.launch()
+        except PlaywrightError as exc:
+            pytest.skip(
+                f"chromium not available ({exc}) — "
+                "run `python -m playwright install chromium`"
+            )
+        try:
+            yield browser.new_page()
+        finally:
+            browser.close()

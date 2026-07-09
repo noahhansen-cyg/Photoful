@@ -90,10 +90,13 @@ function Header({ code, connected }) {
 
 function LobbyScreen({ players, code }) {
   const [localIp, setLocalIp] = useState(null);
-  // On localhost the QR code must show the LAN IP so phones on the same WiFi
-  // can connect.  On a public host (cloud / Railway) window.location is already
-  // the right address — skip the polling to avoid leaking an internal IP.
-  const isLocal = window.location.hostname === "localhost";
+  // On a loopback address (localhost in dev, 127.0.0.1 in the packaged
+  // Electron app) the QR code must show the LAN IP so phones on the same WiFi
+  // can connect.  On a public host window.location is already the right
+  // address — skip the polling to avoid leaking an internal IP.
+  const isLocal = ["localhost", "127.0.0.1", "[::1]"].includes(
+    window.location.hostname
+  );
   useEffect(() => {
     if (!isLocal) return;
     fetch("/api/server-info")
@@ -117,6 +120,7 @@ function LobbyScreen({ players, code }) {
             level="M"
           />
           <p style={styles.qrHint}>Scan to join</p>
+          <p data-testid="join-url" style={styles.joinUrl}>{joinUrl}</p>
         </div>
         <div style={styles.playerSection}>
           <h2 style={styles.bigLabel}>
@@ -556,6 +560,7 @@ const styles = {
   lobbyLayout:   { display: "flex", gap: "4rem", alignItems: "center", flexWrap: "wrap", justifyContent: "center" },
   qrSection:     { display: "flex", flexDirection: "column", alignItems: "center", gap: "0.75rem", background: "#1a1a2e", borderRadius: 16, padding: "1.5rem", border: "2px solid #2d2d44" },
   qrHint:        { color: "#aaa", fontSize: "0.95rem", margin: 0 },
+  joinUrl:       { color: "#888", fontSize: "0.8rem", margin: 0, wordBreak: "break-all" },
   playerSection: { display: "flex", flexDirection: "column", alignItems: "center", gap: "1.5rem" },
 
   roundIntroBadge: { fontSize: "2rem", fontWeight: "bold", color: "#6c63ff" },

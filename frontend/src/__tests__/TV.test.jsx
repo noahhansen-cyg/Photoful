@@ -237,6 +237,36 @@ describe("TV lobby QR code", () => {
     });
   });
 
+  it("uses the local network IP when served from 127.0.0.1 (packaged app)", async () => {
+    vi.stubGlobal("location", new URL("http://127.0.0.1:5017/room/ABCD/tv"));
+    vi.spyOn(global, "fetch").mockResolvedValueOnce({
+      json: async () => ({ local_ip: "192.168.1.100" }),
+    });
+    try {
+      renderTV("ABCD");
+      await waitFor(() => {
+        expect(screen.getByTestId("qr-code").dataset.value).toBe(
+          "http://192.168.1.100:5017/room/ABCD/phone"
+        );
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("displays the join URL as text matching the QR code value", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValueOnce({
+      json: async () => ({ local_ip: "192.168.1.100" }),
+    });
+    renderTV("ABCD");
+    await waitFor(() => {
+      expect(screen.getByTestId("join-url").textContent).toContain("192.168.1.100");
+    });
+    expect(screen.getByTestId("join-url").textContent).toBe(
+      screen.getByTestId("qr-code").dataset.value
+    );
+  });
+
   it("shows a 'Scan to join' hint below the QR code", () => {
     renderTV("ABCD");
     expect(screen.getByText(/scan to join/i)).toBeInTheDocument();
