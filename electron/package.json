@@ -1,19 +1,20 @@
 {
-  "name": "photo-quiplash",
+  "name": "photoful",
   "version": "0.1.0",
   "description": "A party photo game for TV + phones",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "package": "electron-builder"
+    "package": "electron-builder",
+    "package:dir": "electron-builder --dir"
   },
   "devDependencies": {
     "electron": "^33.0.0",
     "electron-builder": "^25.0.0"
   },
   "build": {
-    "appId": "com.photoquiplash.app",
-    "productName": "Photo Quiplash",
+    "appId": "com.photoful.app",
+    "productName": "Photoful",
     "directories": {
       "output": "../dist"
     },
@@ -22,22 +23,29 @@
     ],
     "extraResources": [
       {
-        "from": "../backend/dist/quiplash-server",
-        "to": "server/quiplash-server"
-      },
-      {
-        "from": "../backend/dist/quiplash-server.exe",
-        "to": "server/quiplash-server.exe"
+        "from": "../backend/dist/photoful-server",
+        "to": "server"
       }
     ],
     "mac": {
       "target": [
-        { "target": "dmg", "arch": ["x64", "arm64"] }
+        "dmg",
+        "zip"
       ],
       "category": "public.app-category.games"
     },
     "win": {
-      "target": "nsis"
+      "target": [
+        "nsis",
+        "zip"
+      ]
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "tar.gz"
+      ],
+      "category": "Game"
     }
   }
 }

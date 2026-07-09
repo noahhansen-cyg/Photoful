@@ -44,7 +44,7 @@ export default function Home() {
 
   return (
     <div style={styles.container}>
-      <h1 style={styles.title}>📸 Photo Quiplash</h1>
+      <h1 style={styles.title}>📸 Photoful</h1>
       <p style={styles.subtitle}>Take photos. Vote on them. Laugh.</p>
 
       <button style={styles.primaryBtn} onClick={createRoom} disabled={loading}>

@@ -24,7 +24,7 @@ def create_room():
         "prompts":            [],   # list of PromptAssignment dicts
         "current_prompt_idx": 0,
         "timer_end":          None, # unix timestamp (float) when current timer expires
-        "timer_greenlet":     None, # gevent greenlet handle for cancellation
+        "timer":              None, # threading.Timer handle for cancellation
         "caption_prompt":     None, # caption-round dict (final round)
     }
     return rooms[code]
@@ -185,7 +185,7 @@ def reset_room(code):
     room["prompts"]             = []
     room["current_prompt_idx"]  = 0
     room["timer_end"]           = None
-    room["timer_greenlet"]      = None
+    room["timer"]      = None
     room["caption_prompt"]      = None
     for p in room["players"]:
         p["score"] = 0

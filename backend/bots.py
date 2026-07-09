@@ -18,6 +18,7 @@ Press Ctrl+C to stop.
 """
 
 import argparse
+import os
 import sys
 import time
 import io
@@ -28,7 +29,9 @@ import requests
 import socketio
 from PIL import Image
 
-BASE = "http://localhost:5000"
+# Override to point bots at a non-default server (e.g. the packaged binary):
+#   PHOTOFUL_URL=http://localhost:52341 python bots.py
+BASE = os.environ.get("PHOTOFUL_URL", "http://localhost:5000")
 
 
 # ---------------------------------------------------------------------------
