@@ -132,7 +132,9 @@ async function resolveAppUrl() {
     return `http://127.0.0.1:${serverPort}`;
   }
 
-  serverPort = await findFreePort();
+  // PHOTOFUL_PORT pins the server to a known port so external tools (e.g.
+  // `make packagetest` bots) can reach it; otherwise pick a free one.
+  serverPort = Number(process.env.PHOTOFUL_PORT) || (await findFreePort());
   const url = `http://127.0.0.1:${serverPort}`;
   startServer(serverPort);
   await waitForServer(url);

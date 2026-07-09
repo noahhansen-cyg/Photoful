@@ -83,7 +83,7 @@ make dev       # start backend + frontend together
 | `make build-electron` | Wrap the server bundle in an Electron installer |
 | `make package-dir` | Fast unpacked desktop build (no installer) for local testing |
 | `make package` | Full pipeline — outputs installer to `dist/` |
-| `make packagetest` | Run the packaged server binary + 3 bot players for solo testing |
+| `make packagetest` | Build the full desktop package, launch the app, and join bots to your room |
 
 ---
 
@@ -153,13 +153,14 @@ Override the bot count with `bots=N` (max 8): `make devtest bots=5`.
 
 ### Testing the packaged build
 
-`make packagetest` is the same workflow but runs the PyInstaller server bundle (`backend/dist/photoful-server/`) instead of the dev servers — the production frontend is served by the binary itself on port 5000, so the printed TV URL points there.
+`make packagetest` tests the real desktop app end-to-end: it runs the full `make package` pipeline (dmg installer + unpacked `.app` in `dist/`), launches the packaged application itself (macOS), and joins bot players to the room you create in its window. The app is pinned to a known port (`PHOTOFUL_PORT`, default 5017, override with `port=N`) so the bots can reach the embedded server.
 
 ```bash
-make build-backend   # or make package — either produces the binary
 make packagetest     # or: make packagetest bots=5
-# → open the printed TV URL (http://localhost:5000/room/CODE/tv)
-# → navigate to http://localhost:5000 on your phone, enter the code, join as Host
+# → the Photoful window opens; click Play
+# → type the room code from the TV screen at the terminal prompt; bots join
+# → navigate to http://localhost:5017 on your phone/browser, enter the code, join as Host
+# → Ctrl+C stops the bots and quits the app
 ```
 
 Note: uploads in the packaged build go to the user-data directory (e.g. `~/Library/Application Support/Photoful/uploads` on macOS), not `backend/uploads/`.
