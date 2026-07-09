@@ -9,7 +9,6 @@ import logging
 import socket
 from flask import Flask, request, jsonify, send_from_directory
 from flask_socketio import SocketIO, emit, join_room
-from flask_cors import CORS
 from PIL import Image
 import rooms as room_store
 import game
@@ -30,11 +29,11 @@ log = logging.getLogger(__name__)
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-secret-change-in-prod")
 
-CORS(app, resources={r"/api/*": {"origins": "*"}})
-
-# One async mode everywhere — dev, cloud, and the packaged binary all run
-# threading mode with real WebSocket support via simple-websocket. This keeps
-# the desktop build byte-for-byte identical to the web app's runtime path.
+# One async mode everywhere — dev and the packaged binary both run threading
+# mode with real WebSocket support via simple-websocket, so the desktop build
+# is byte-for-byte identical to what runs in development.
+# cors_allowed_origins="*" stays: in dev the Vite proxy forwards the socket.io
+# handshake with an Origin (:5173) that differs from the backend's Host.
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 
 PORT = int(os.environ.get("PORT", "5000"))
@@ -67,8 +66,8 @@ def _get_frontend_dist():
     """Return the path to the built React app, or None if it isn't built.
 
     The same SPA-serving code path runs everywhere: the PyInstaller bundle
-    ships it under sys._MEIPASS, while dev/Docker use ../frontend/dist when
-    a build exists (in dev you normally use the Vite server on :5173).
+    ships it under sys._MEIPASS, while an unfrozen server uses ../frontend/dist
+    when a build exists (in dev you normally use the Vite server on :5173).
     """
     if _FROZEN:
         return os.path.join(sys._MEIPASS, "frontend_dist")
@@ -110,8 +109,7 @@ def get_local_ip():
 
 @app.route("/api/server-info")
 def server_info():
-    host = os.environ.get("APP_HOST") or get_local_ip()
-    return jsonify({"local_ip": host})
+    return jsonify({"local_ip": get_local_ip()})
 
 
 @app.route("/api/rooms", methods=["POST"])

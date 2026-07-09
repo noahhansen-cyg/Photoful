@@ -1,4 +1,5 @@
-.PHONY: dev devtest packagetest stop test test-backend test-frontend install \
+.PHONY: dev devtest packagetest stop test test-backend test-frontend \
+        test-binary install \
         build-frontend build-backend build-electron package package-dir
 
 # Start both servers. Ctrl+C stops everything cleanly.
@@ -67,7 +68,7 @@ stop:
 # Install all dependencies (run once after cloning)
 install:
 	@echo "Installing Python dependencies..."
-	cd backend && pip install -r requirements.txt
+	cd backend && pip install -r requirements-dev.txt
 	@echo "Installing Node dependencies..."
 	cd frontend && npm install
 	@echo "All dependencies installed."
@@ -82,6 +83,15 @@ test-backend:
 test-frontend:
 	@echo "Running frontend tests..."
 	cd frontend && npm test
+
+# Automated end-to-end tests against the packaged server binary: spawns the
+# real PyInstaller executable and plays a complete game over HTTP + Socket.IO
+# (see backend/tests_e2e/). Rebuilds the bundle first so the tests always
+# exercise the current code; to rerun against an existing build:
+#   cd backend && python -m pytest tests_e2e/ -v
+test-binary: build-backend
+	@echo "Running binary end-to-end tests..."
+	cd backend && python -m pytest tests_e2e/ -v
 
 # ---------------------------------------------------------------------------
 # Packaging — produce a distributable Electron app

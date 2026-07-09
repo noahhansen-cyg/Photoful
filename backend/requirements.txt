@@ -1,7 +1,5 @@
 flask
 flask-socketio
-flask-cors
 simple-websocket
 pillow
 requests
-gunicorn

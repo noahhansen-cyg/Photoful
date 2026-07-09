@@ -18,18 +18,24 @@ import rooms as room_store
 _lock = threading.RLock()
 
 PROMPTS_PATH = os.path.join(os.path.dirname(__file__), "prompts.json")
-SUBMIT_TIMEOUT = 120  # seconds players have to submit photos for ALL their prompts
-VOTE_TIMEOUT   = 30   # seconds players have to vote
-SCORES_TIMEOUT = 5    # seconds scores screen is shown before advancing
+
+# PHOTOFUL_TIMER_SCALE multiplies every phase duration. Defaults to 1 (real
+# timings). The binary E2E suite sets it well below 1 so a full game — with its
+# fixed intro/scores screens — finishes in seconds instead of minutes.
+_TIMER_SCALE = float(os.environ.get("PHOTOFUL_TIMER_SCALE", "1"))
+
+SUBMIT_TIMEOUT = 120 * _TIMER_SCALE  # seconds players have to submit photos for ALL their prompts
+VOTE_TIMEOUT   = 30 * _TIMER_SCALE   # seconds players have to vote
+SCORES_TIMEOUT = 5 * _TIMER_SCALE    # seconds scores screen is shown before advancing
 
 POINTS_PER_VOTE       = 1000
 PROMPTS_PER_PLAYER    = 2
-VOTING_INTRO_TIMEOUT  = 5   # seconds the "Round N — Let's Vote!" screen is shown before voting
-ROUND_INTRO_TIMEOUT   = 7   # seconds the "Round N!" screen is shown before next submitting phase
+VOTING_INTRO_TIMEOUT  = 5 * _TIMER_SCALE   # seconds the "Round N — Let's Vote!" screen is shown before voting
+ROUND_INTRO_TIMEOUT   = 7 * _TIMER_SCALE   # seconds the "Round N!" screen is shown before next submitting phase
 TOTAL_ROUNDS          = 2   # total number of photo voting rounds
-CAPTION_INTRO_TIMEOUT = 7   # seconds showing featured photo before captioning
-CAPTION_TIMEOUT       = 60  # seconds to submit text captions
-EXTEND_AMOUNT         = 30  # seconds added to the submission timer per host extension
+CAPTION_INTRO_TIMEOUT = 7 * _TIMER_SCALE   # seconds showing featured photo before captioning
+CAPTION_TIMEOUT       = 60 * _TIMER_SCALE  # seconds to submit text captions
+EXTEND_AMOUNT         = 30 * _TIMER_SCALE  # seconds added to the submission timer per host extension
 
 
 def load_prompts():
@@ -415,8 +421,8 @@ def cancel_timer(room):
 
 
 # ---------------------------------------------------------------------------
-# Phase timer — plain threading.Timer so the exact same code runs in dev,
-# in the cloud deploy, and in the packaged binary.
+# Phase timer — plain threading.Timer so the exact same code runs in dev
+# and in the packaged binary.
 # ---------------------------------------------------------------------------
 
 def _start_timer(room_code, seconds, callback, socketio):

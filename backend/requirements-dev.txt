@@ -1,0 +1,5 @@
+# Test/development-only dependencies — not shipped in the packaged binary.
+-r requirements.txt
+pytest
+python-socketio[client]
+websocket-client

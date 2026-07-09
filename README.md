@@ -24,8 +24,10 @@ photoful/
 │   ├── bots.py          # Bot players for local testing (make devtest)
 │   ├── prompts.json     # Bank of 46 photo prompts
 │   ├── photoful.spec    # PyInstaller spec — bundles server into a binary
+│   ├── tests/           # Unit tests (in-process, no network)
+│   ├── tests_e2e/       # End-to-end tests against the packaged binary
 │   ├── uploads/         # Uploaded photos (created at runtime)
-│   └── requirements.txt
+│   └── requirements.txt # runtime deps (requirements-dev.txt adds test deps)
 ├── electron/
 │   ├── main.js          # Electron main process — spawns Flask, opens BrowserWindow
 │   └── package.json     # Electron + electron-builder config
@@ -70,9 +72,10 @@ make dev       # start backend + frontend together
 | `make devtest` | Start servers + 3 bot players for solo testing |
 | `make stop` | Force-kill anything on ports 5000 and 5173 |
 | `make install` | Install Python + Node dependencies in one shot |
-| `make test` | Run all tests (backend + frontend) |
+| `make test` | Run all unit tests (backend + frontend) |
 | `make test-backend` | Run backend pytest suite only |
 | `make test-frontend` | Run frontend vitest suite only |
+| `make test-binary` | Build the server binary, then run automated end-to-end tests against it |
 
 ### Packaging
 
@@ -93,7 +96,7 @@ make dev       # start backend + frontend together
 
 ```bash
 cd backend
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 python app.py
 ```
 
@@ -151,7 +154,18 @@ Bots vote with a 5–10s random delay so you have time to vote first.
 
 Override the bot count with `bots=N` (max 8): `make devtest bots=5`.
 
-### Testing the packaged build
+### Automated binary tests
+
+`make test-binary` builds the PyInstaller bundle and runs `backend/tests_e2e/` against the actual executable: it spawns the binary, verifies the embedded React app is served, and plays a complete 4-player game (both photo rounds, the caption round, restart) over real HTTP + Socket.IO connections — the same transports phones use. Game timers run at 5x speed via `PHOTOFUL_TIMER_SCALE`, so the whole suite takes under a minute after the build.
+
+The same suite runs in CI on Linux and macOS on every push and pull request (`.github/workflows/build.yml`), so packaging breakage — a missing hidden import, an asset that didn't make it into the bundle — is caught before merge.
+
+```bash
+make test-binary                              # rebuild bundle + run suite
+cd backend && python -m pytest tests_e2e/ -v  # rerun against the existing build
+```
+
+### Interactive test of the desktop app
 
 `make packagetest` tests the real desktop app end-to-end: it runs the full `make package` pipeline (dmg installer + unpacked `.app` in `dist/`), launches the packaged application itself (macOS), and joins bot players to the room you create in its window. The app is pinned to a known port (`PHOTOFUL_PORT`, default 5017, override with `port=N`) so the bots can reach the embedded server.
 
@@ -171,7 +185,7 @@ Note: uploads in the packaged build go to the user-data directory (e.g. `~/Libra
 
 `make package` produces a double-clickable installer that bundles the entire game — no Python, Node, or terminal required. It is compatible with Steam and other game launchers.
 
-**The desktop app is 1:1 with the web app.** There is no separate "packaged mode": the server runs the exact same Flask + Flask-SocketIO threading/simple-websocket stack in development, in the cloud deploy, and inside the binary. The only packaged-app differences are where uploads are written (user-data dir) and that the port is picked dynamically at launch.
+**The desktop app is the product.** The React frontend is not a separate web app — it is the game's UI, compiled into the binary and served by the embedded Flask server to the game window and to players' phones over LAN. Development mode (`make dev`) runs the exact same Flask + Flask-SocketIO threading/simple-websocket stack; the only packaged-app differences are where uploads are written (user-data dir) and that the port is picked dynamically at launch.
 
 ### How it works
 
@@ -234,7 +248,7 @@ In the packaged app, photos are stored in a writable user-data directory rather 
 | Layer | Technology |
 |---|---|
 | Backend | Python, Flask, Flask-SocketIO |
-| WebSockets | threading async mode + simple-websocket — identical in dev, cloud, and the packaged app |
+| WebSockets | threading async mode + simple-websocket — identical in dev and the packaged app |
 | Image processing | Pillow (server-side resize to 1280px JPEG) |
 | Frontend | React, Vite |
 | Real-time client | socket.io-client |
