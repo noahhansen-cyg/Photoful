@@ -855,6 +855,20 @@ def test_advance_state_round_intro_assigns_new_prompts():
     assert new_prompt_ids.isdisjoint(old_prompt_ids)
 
 
+def test_advance_state_round_intro_includes_disconnected_players_in_prompts():
+    """A player whose phone is backgrounded during the round intro still gets
+    prompts in the next round — disconnecting must not drop them from the game."""
+    code, player_ids = _room_in_submitting()
+    rooms[code]["players"][0]["is_connected"] = False
+    rooms[code]["state"] = "round_intro"
+    rooms[code]["round"] = 2
+    mock_io = _mock_socketio()
+    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+        game.advance_state(code, mock_io)
+    all_assigned_ids = {pid for p in rooms[code]["prompts"] for pid in p["player_ids"]}
+    assert player_ids[0] in all_assigned_ids
+
+
 def test_advance_state_round_intro_sets_timer_end():
     code, _ = _room_in_submitting()
     rooms[code]["state"] = "round_intro"
@@ -1022,6 +1036,18 @@ def test_advance_state_scores_to_caption_intro_after_round_2():
     assert rooms[code]["state"] == "caption_intro"
     assert rooms[code]["caption_prompt"] is not None
     assert rooms[code]["caption_prompt"]["round_type"] == "caption"
+
+
+def test_advance_state_caption_prompt_includes_disconnected_players():
+    """A disconnected player is still assigned to the caption round so they can
+    participate when they re-open the web app."""
+    code, player_ids = _room_in_scores_round2_last_prompt_with_submissions()
+    rooms[code]["players"][0]["is_connected"] = False
+    mock_io = _mock_socketio()
+    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+        game.advance_state(code, mock_io)
+    assert rooms[code]["state"] == "caption_intro"
+    assert player_ids[0] in rooms[code]["caption_prompt"]["player_ids"]
 
 
 def test_advance_state_scores_to_final_if_no_best_photo():

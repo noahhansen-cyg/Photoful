@@ -523,6 +523,82 @@ def test_disconnect_broadcasts_game_state_to_room(client):
             observer.disconnect()
 
 
+def test_disconnect_keeps_player_in_broadcast_state(client):
+    """Backgrounding the phone browser must not remove the player's name from
+    the game — they stay in game:state, flagged as disconnected."""
+    code = room_store.create_room()["code"]
+    observer = socketio.test_client(app)
+    try:
+        observer.emit("player:join", {"room_code": code, "name": "Observer", "role": "player"})
+        observer.get_received()
+        client.emit("player:join", {"room_code": code, "name": "Alice", "role": "player"})
+        client.get_received()
+        observer.get_received()  # clear the broadcast from Alice joining
+
+        client.disconnect()
+
+        received = observer.get_received()
+        state = _find_event(received, "game:state")["args"][0]
+        by_name = {p["name"]: p for p in state["players"]}
+        assert by_name["Alice"]["is_connected"] is False
+        assert by_name["Observer"]["is_connected"] is True
+    finally:
+        if observer.is_connected():
+            observer.disconnect()
+
+
+def test_reconnect_after_disconnect_restores_same_player_id(client):
+    """Re-opening the web app rejoins the same slot (same player id)."""
+    code = room_store.create_room()["code"]
+    client.emit("player:join", {"room_code": code, "name": "Alice", "role": "player"})
+    received = client.get_received()
+    original_id = _find_event(received, "player:self")["args"][0]["player_id"]
+    client.disconnect()
+
+    client2 = socketio.test_client(app)
+    try:
+        client2.emit("player:join", {"room_code": code, "name": "Alice", "role": "player"})
+        received = client2.get_received()
+        assert _find_event(received, "player:self")["args"][0]["player_id"] == original_id
+        state = _find_event(received, "game:state")["args"][0]
+        assert len(state["players"]) == 1
+        assert state["players"][0]["is_connected"] is True
+    finally:
+        if client2.is_connected():
+            client2.disconnect()
+
+
+def test_disconnected_voter_does_not_block_early_advance(client):
+    """A player who backgrounded their phone mid-vote must not stall the game:
+    once every *connected* eligible voter has voted, the state advances."""
+    code = room_store.create_room()["code"]
+    client.emit("player:join", {"room_code": code, "name": "Alice", "role": "player"})
+    received = client.get_received()
+    # Voting setup: Alice is the only connected non-competing voter.
+    rooms[code]["state"] = "voting"
+    rooms[code]["prompts"] = [{
+        "prompt_id":   "pid-1",
+        "prompt_text": "test prompt",
+        "player_ids":  ["p1", "p2"],
+        "submissions": {},
+        "votes":       {},
+    }]
+    rooms[code]["current_prompt_idx"] = 0
+    for pid, name in [("p1", "CompeteA"), ("p2", "CompeteB")]:
+        _add_player_direct(code, pid, name)
+    # A second eligible voter who has disconnected (backgrounded browser)
+    _add_player_direct(code, "p_gone", "Ghost")
+    next(p for p in rooms[code]["players"] if p["id"] == "p_gone")["is_connected"] = False
+
+    rooms[code]["timer_greenlet"] = MagicMock(dead=False)
+    with patch("game._start_timer", return_value=MagicMock(dead=False)):
+        client.emit("submit:vote", {
+            "room_code": code, "prompt_id": "pid-1", "voted_for_id": "p1",
+        })
+        client.get_received()
+    assert rooms[code]["state"] == "scores"
+
+
 def test_disconnect_player_not_in_any_room_is_harmless():
     """A socket that never joined a room disconnecting should not raise."""
     app.config["TESTING"] = True
