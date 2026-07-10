@@ -306,8 +306,10 @@ def _advance_state(room_code, socketio):
             )
         else:
             # All photo rounds done — start the caption round.
+            # Disconnected players stay in the game (they may re-open the app);
+            # timers and connected-only early-advance checks keep things moving.
             players = [p for p in room["players"]
-                       if p["is_connected"] and p["role"] in ("player", "host")]
+                       if p["role"] in ("player", "host")]
             best = find_best_photo(room["prompts"])
             if best and len(players) >= 2:
                 room["caption_prompt"] = create_caption_prompt(players, best)
@@ -322,8 +324,9 @@ def _advance_state(room_code, socketio):
 
     elif state == "round_intro":
         # Intro timer fired — assign fresh prompts and start a new submission phase.
+        # Disconnected players are still assigned prompts so they stay in the game.
         players = [p for p in room["players"]
-                   if p["is_connected"] and p["role"] in ("player", "host")]
+                   if p["role"] in ("player", "host")]
         room["prompts"]            = assign_prompts(players)
         room["current_prompt_idx"] = 0
         room["state"]    = "submitting"
@@ -374,8 +377,10 @@ def start_game(room_code, socketio):
         if not room:
             return False
 
+        # Everyone who joined gets prompts, even if momentarily disconnected
+        # (e.g. phone browser backgrounded) — they rejoin the same slot on reconnect.
         players = [p for p in room["players"]
-                   if p["is_connected"] and p["role"] in ("player", "host")]
+                   if p["role"] in ("player", "host")]
         if len(players) < 2:
             return False
 

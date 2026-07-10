@@ -612,14 +612,17 @@ def test_advance_state_voting_to_scores_stores_score_deltas_on_prompt():
 # start_game — player filtering (disconnected & TV roles)
 # ---------------------------------------------------------------------------
 
-def test_start_game_excludes_disconnected_players():
-    """A disconnected player does not count toward the 2-player minimum."""
-    code, _ = _room_with_n_players(2)
+def test_start_game_includes_disconnected_players():
+    """A player who joined but is momentarily disconnected (backgrounded phone
+    browser) still counts and still receives prompt assignments."""
+    code, player_ids = _room_with_n_players(2)
     rooms[code]["players"][0]["is_connected"] = False
     mock_io = _mock_socketio()
     with patch("game._start_timer", return_value=MagicMock()):
         result = game.start_game(code, mock_io)
-    assert result is False  # only 1 connected player → cannot start
+    assert result is True
+    all_assigned_ids = {pid for p in rooms[code]["prompts"] for pid in p["player_ids"]}
+    assert rooms[code]["players"][0]["id"] in all_assigned_ids
 
 
 def test_start_game_excludes_tv_players_from_prompt_assignments():

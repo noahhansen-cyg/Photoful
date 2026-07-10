@@ -175,22 +175,26 @@ def test_get_room_state_includes_room_code_and_state():
     assert state["state"] == "lobby"
 
 
-def test_get_room_state_only_includes_connected_players():
+def test_get_room_state_keeps_disconnected_players():
+    """Disconnected players stay visible (with is_connected=False) until the game ends."""
     room = room_store.create_room()
     room_store.add_player(room["code"], _make_player(id="1", socket_id="s1", name="Alice"))
     room_store.add_player(room["code"], _make_player(id="2", socket_id="s2", name="Bob"))
     room_store.remove_player("s1")
     state = room_store.get_room_state(room["code"])
-    assert len(state["players"]) == 1
-    assert state["players"][0]["name"] == "Bob"
+    assert len(state["players"]) == 2
+    by_name = {p["name"]: p for p in state["players"]}
+    assert by_name["Alice"]["is_connected"] is False
+    assert by_name["Bob"]["is_connected"] is True
 
 
-def test_get_room_state_empty_when_all_disconnected():
+def test_get_room_state_keeps_player_when_all_disconnected():
     room = room_store.create_room()
     room_store.add_player(room["code"], _make_player(socket_id="s1"))
     room_store.remove_player("s1")
     state = room_store.get_room_state(room["code"])
-    assert state["players"] == []
+    assert len(state["players"]) == 1
+    assert state["players"][0]["is_connected"] is False
 
 
 def test_get_room_state_includes_sprint2_fields():
