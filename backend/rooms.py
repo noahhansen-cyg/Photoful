@@ -143,15 +143,18 @@ def get_room_state(code):
     if not room:
         return None
 
-    connected_players = [
+    # Include every player who has joined — disconnected ones stay visible so
+    # briefly backgrounding the phone browser doesn't drop them from the game.
+    players = [
         {
             "id":           p["id"],
             "name":         p["name"],
             "score":        p.get("score", 0),
             "avatar_color": p["avatar_color"],
             "role":         p["role"],
+            "is_connected": p["is_connected"],
         }
-        for p in room["players"] if p["is_connected"]
+        for p in room["players"]
     ]
 
     prompt = get_current_prompt(code)
@@ -162,7 +165,7 @@ def get_room_state(code):
         "room_code":      code,
         "state":          room["state"],
         "round":          room.get("round", 1),
-        "players":        connected_players,
+        "players":        players,
         "prompts":        room["prompts"],    # all prompts (used during submitting phase)
         "current_prompt": prompt,             # the active prompt for voting/scores
         "caption_prompt": room.get("caption_prompt"),

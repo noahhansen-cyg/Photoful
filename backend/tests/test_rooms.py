@@ -125,6 +125,18 @@ def test_add_player_reconnect_marks_player_connected():
     assert rooms[room["code"]]["players"][0]["is_connected"] is True
 
 
+def test_add_player_reconnect_preserves_id_and_score():
+    """Re-opening the web app mid-game reclaims the same slot: id and score survive."""
+    room = room_store.create_room()
+    room_store.add_player(room["code"], _make_player(id="orig-id", socket_id="old-socket"))
+    rooms[room["code"]]["players"][0]["score"] = 2000
+    room_store.remove_player("old-socket")
+    room_store.add_player(room["code"], _make_player(id="new-id", socket_id="new-socket"))
+    stored = rooms[room["code"]]["players"][0]
+    assert stored["id"] == "orig-id"
+    assert stored["score"] == 2000
+
+
 # ---------------------------------------------------------------------------
 # remove_player
 # ---------------------------------------------------------------------------
@@ -175,22 +187,26 @@ def test_get_room_state_includes_room_code_and_state():
     assert state["state"] == "lobby"
 
 
-def test_get_room_state_only_includes_connected_players():
+def test_get_room_state_keeps_disconnected_players():
+    """Disconnected players stay visible (with is_connected=False) until the game ends."""
     room = room_store.create_room()
     room_store.add_player(room["code"], _make_player(id="1", socket_id="s1", name="Alice"))
     room_store.add_player(room["code"], _make_player(id="2", socket_id="s2", name="Bob"))
     room_store.remove_player("s1")
     state = room_store.get_room_state(room["code"])
-    assert len(state["players"]) == 1
-    assert state["players"][0]["name"] == "Bob"
+    assert len(state["players"]) == 2
+    by_name = {p["name"]: p for p in state["players"]}
+    assert by_name["Alice"]["is_connected"] is False
+    assert by_name["Bob"]["is_connected"] is True
 
 
-def test_get_room_state_empty_when_all_disconnected():
+def test_get_room_state_keeps_player_when_all_disconnected():
     room = room_store.create_room()
     room_store.add_player(room["code"], _make_player(socket_id="s1"))
     room_store.remove_player("s1")
     state = room_store.get_room_state(room["code"])
-    assert state["players"] == []
+    assert len(state["players"]) == 1
+    assert state["players"][0]["is_connected"] is False
 
 
 def test_get_room_state_includes_sprint2_fields():
@@ -518,6 +534,17 @@ def test_reset_room_keeps_players():
     code = _room_with_final_state()
     room_store.reset_room(code)
     assert len(rooms[code]["players"]) == 2
+
+
+def test_reset_room_keeps_disconnected_players():
+    """Play-again must not drop players whose phones were asleep on the final screen."""
+    code = _room_with_final_state()
+    room_store.remove_player("s2")
+    room_store.reset_room(code)
+    names = {p["name"] for p in rooms[code]["players"]}
+    assert names == {"Alice", "Bob"}
+    state = room_store.get_room_state(code)
+    assert len(state["players"]) == 2
 
 
 def test_reset_room_preserves_host_id():

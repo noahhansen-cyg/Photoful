@@ -187,6 +187,21 @@ describe("TV player list via game:state", () => {
     expect(screen.queryByText("Alice")).not.toBeInTheDocument();
   });
 
+  it("still shows a disconnected player's name (backgrounded phone browser)", () => {
+    renderTV();
+    act(() => {
+      emit("game:state", {
+        state: "lobby",
+        players: [
+          { id: "1", name: "Alice", role: "player", avatar_color: "#FF6B6B", is_connected: true },
+          { id: "2", name: "Bob", role: "player", avatar_color: "#4ECDC4", is_connected: false },
+        ],
+      });
+    });
+    expect(screen.getByText("Alice")).toBeInTheDocument();
+    expect(screen.getByText("Bob")).toBeInTheDocument();
+  });
+
   it("shows waiting message when game:state has no players", () => {
     renderTV();
     act(() => {
