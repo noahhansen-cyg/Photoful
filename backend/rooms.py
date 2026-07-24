@@ -1,5 +1,6 @@
 import random
 import string
+import time
 
 # In-memory store: { room_code: room_dict }
 rooms = {}
@@ -24,8 +25,10 @@ def create_room():
         "prompts":            [],   # list of PromptAssignment dicts
         "current_prompt_idx": 0,
         "timer_end":          None, # unix timestamp (float) when current timer expires
+        "timer_total":        None, # full duration (seconds) of the current phase timer
         "timer":              None, # threading.Timer handle for cancellation
         "caption_prompt":     None, # caption-round dict (final round)
+        "pair_history":       {},   # {frozenset({id_a, id_b}): times matched} across all rounds
     }
     return rooms[code]
 
@@ -170,6 +173,10 @@ def get_room_state(code):
         "current_prompt": prompt,             # the active prompt for voting/scores
         "caption_prompt": room.get("caption_prompt"),
         "timer_end":      room.get("timer_end"),
+        "timer_total":    room.get("timer_total"),
+        # Server wall clock at emit time so clients can correct for local
+        # clock skew instead of trusting their own Date.now().
+        "server_now":     time.time(),
         "prompt_number":  idx + 1 if total else 0,
         "total_prompts":  total,
     }
@@ -188,8 +195,10 @@ def reset_room(code):
     room["prompts"]             = []
     room["current_prompt_idx"]  = 0
     room["timer_end"]           = None
+    room["timer_total"]         = None
     room["timer"]      = None
     room["caption_prompt"]      = None
+    room["pair_history"]        = {}
     for p in room["players"]:
         p["score"] = 0
     return True

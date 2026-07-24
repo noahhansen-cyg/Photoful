@@ -9,6 +9,9 @@ export default function TV() {
   const [connected, setConnected] = useState(false);
   const [timeLeft, setTimeLeft]   = useState(null);
   const timerRef                  = useRef(null);
+  // Difference between the server's clock and this device's clock, refreshed
+  // on every game:state so countdowns track the server regardless of local skew.
+  const clockOffsetRef            = useRef(0);
 
   useEffect(() => {
     socket.connect();
@@ -20,7 +23,12 @@ export default function TV() {
       socket.emit("player:join", { room_code: code, name: "TV", role: "tv" });
     });
     socket.on("disconnect", () => setConnected(false));
-    socket.on("game:state", (state) => setGameState(state));
+    socket.on("game:state", (state) => {
+      if (typeof state?.server_now === "number") {
+        clockOffsetRef.current = state.server_now - Date.now() / 1000;
+      }
+      setGameState(state);
+    });
 
     return () => {
       socket.off("connect");
@@ -35,7 +43,7 @@ export default function TV() {
     clearInterval(timerRef.current);
     if (!gameState?.timer_end) { setTimeLeft(null); return; }
     const tick = () => {
-      const secs = Math.max(0, Math.round(gameState.timer_end - Date.now() / 1000));
+      const secs = Math.max(0, Math.round(gameState.timer_end - (Date.now() / 1000 + clockOffsetRef.current)));
       setTimeLeft(secs);
     };
     tick();
@@ -58,7 +66,7 @@ export default function TV() {
         {state === "round_intro"    && <RoundIntroScreen gameState={gameState} />}
         {state === "caption_intro"  && <CaptionIntroScreen gameState={gameState} />}
         {state === "captioning"     && <CaptioningScreen gameState={gameState} players={players} timeLeft={timeLeft} />}
-        {state === "caption_voting" && <CaptionVotingScreen gameState={gameState} players={players} timeLeft={timeLeft} />}
+        {state === "caption_voting" && <CaptionVotingScreen gameState={gameState} timeLeft={timeLeft} />}
         {state === "caption_scores" && <CaptionScoresScreen gameState={gameState} players={players} />}
         {state === "final"          && <FinalScreen players={players} />}
       </div>
@@ -152,7 +160,7 @@ function SubmittingScreen({ gameState, players, timeLeft }) {
     <div style={styles.centered}>
       <h2 style={styles.bigLabel}>Players are taking photos...</h2>
       <p style={styles.hint}>{totalReceived} / {totalExpected} photos submitted</p>
-      <TimerBar timeLeft={timeLeft} total={120} />
+      <TimerBar timeLeft={timeLeft} total={gameState?.timer_total ?? 120} />
       <div style={styles.promptProgressGrid}>
         {allPrompts.map((prompt, i) => (
           <div key={prompt.prompt_id} style={styles.promptProgressRow}>
@@ -206,7 +214,7 @@ function VotingScreen({ gameState, players, timeLeft }) {
         <div style={styles.roundBadge}>Round {gameState.round} — 2× Points</div>
       )}
       <h2 style={styles.promptText}>{prompt?.prompt_text}</h2>
-      <TimerBar timeLeft={timeLeft} total={30} />
+      <TimerBar timeLeft={timeLeft} total={gameState?.timer_total ?? 30} />
       <div data-testid="voting-photos" style={{ ...styles.photoRow, opacity: photosVisible ? 1 : 0, transition: photosVisible ? "opacity 3s ease-in" : "none" }}>
         {playerIds.map(pid => {
           const sub    = submissions[pid];
@@ -259,7 +267,7 @@ function ScoresScreen({ gameState, players, timeLeft }) {
       {maxDelta > 0 && !isTie && (
         <p style={styles.roundPoints}>+{maxDelta.toLocaleString()} pts</p>
       )}
-      <TimerBar timeLeft={timeLeft} total={5} />
+      <TimerBar timeLeft={timeLeft} total={gameState?.timer_total ?? 5} />
       <div style={styles.photoRow}>
         {playerIds.map(pid => {
           const sub      = submissions[pid];
@@ -345,7 +353,7 @@ function CaptioningScreen({ gameState, players, timeLeft }) {
         <img src={cp.featured_image_url} style={styles.featuredPhoto} alt="Featured" />
       )}
       <p data-testid="caption-progress" style={styles.hint}>{submitted} / {total} captions submitted</p>
-      <TimerBar timeLeft={timeLeft} total={60} />
+      <TimerBar timeLeft={timeLeft} total={gameState?.timer_total ?? 60} />
     </div>
   );
 }
@@ -354,13 +362,13 @@ function CaptioningScreen({ gameState, players, timeLeft }) {
 // Caption Voting
 // ---------------------------------------------------------------------------
 
-function CaptionVotingScreen({ gameState, players, timeLeft }) {
+// Captions stay anonymous while voting is open — no author names or live vote
+// tallies, so votes go to the funniest caption rather than a friend. Authors
+// and points are revealed on the caption scores screen.
+function CaptionVotingScreen({ gameState, timeLeft }) {
   const cp          = gameState?.caption_prompt;
   const submissions = cp?.submissions ?? {};
-  const votes       = cp?.votes ?? {};
   const playerIds   = cp?.player_ids ?? [];
-  const voteCount   = (pid) => Object.values(votes).filter(v => v === pid).length;
-  const getPlayer   = (id) => players.find(p => p.id === id);
 
   const [captionsVisible, setCaptionsVisible] = useState(false);
   const cpId = cp?.prompt_id;
@@ -376,17 +384,14 @@ function CaptionVotingScreen({ gameState, players, timeLeft }) {
       {cp?.featured_image_url && (
         <img src={cp.featured_image_url} style={styles.featuredPhoto} alt="Featured" />
       )}
-      <TimerBar timeLeft={timeLeft} total={30} />
+      <TimerBar timeLeft={timeLeft} total={gameState?.timer_total ?? 30} />
       <div data-testid="caption-cards" style={{ ...styles.captionGrid, opacity: captionsVisible ? 1 : 0, transition: captionsVisible ? "opacity 3s ease-in" : "none" }}>
         {playerIds.map(pid => {
-          const sub    = submissions[pid];
-          const player = getPlayer(pid);
+          const sub = submissions[pid];
           if (!sub) return null;
           return (
             <div key={pid} style={styles.captionCard}>
               <div style={styles.captionText}>"{sub.caption}"</div>
-              <div style={styles.captionAuthor(player?.avatar_color)}>{player?.name}</div>
-              <div style={styles.voteCount}>{voteCount(pid)} vote{voteCount(pid) !== 1 ? "s" : ""}</div>
             </div>
           );
         })}
@@ -490,7 +495,7 @@ function PlayerAvatar({ player, dim }) {
 
 function TimerBar({ timeLeft, total }) {
   if (timeLeft === null) return null;
-  const pct    = Math.max(0, timeLeft / total) * 100;
+  const pct    = Math.min(100, Math.max(0, timeLeft / total) * 100);
   const urgent = timeLeft <= 10;
   return (
     <div style={styles.timerWrap}>

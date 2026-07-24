@@ -1,4 +1,5 @@
 import pytest
+import random
 import sys
 import os
 import uuid
@@ -1292,3 +1293,249 @@ def test_extend_timer_broadcasts_game_state():
 
 def test_extend_amount_constant_is_positive():
     assert game.EXTEND_AMOUNT > 0
+
+
+# ---------------------------------------------------------------------------
+# timer_total (full duration of the current phase, sent to clients)
+# ---------------------------------------------------------------------------
+
+def test_start_game_sets_timer_total():
+    code, _ = _room_with_n_players(2)
+    mock_io = _mock_socketio()
+    with patch("game._start_timer", return_value=MagicMock()):
+        game.start_game(code, mock_io)
+    assert rooms[code]["timer_total"] == game.SUBMIT_TIMEOUT
+
+
+def test_advance_state_sets_timer_total_per_phase():
+    transitions = [
+        ("submitting",     game.VOTING_INTRO_TIMEOUT),
+        ("voting_intro",   game.VOTE_TIMEOUT),
+        ("voting",         game.SCORES_TIMEOUT),
+        ("caption_intro",  game.CAPTION_TIMEOUT),
+        ("captioning",     game.VOTE_TIMEOUT),
+        ("caption_voting", game.SCORES_TIMEOUT),
+    ]
+    for state, expected_total in transitions:
+        rooms.clear()
+        code, _ = _room_in_submitting()
+        rooms[code]["state"] = state
+        if state.startswith("caption"):
+            rooms[code]["caption_prompt"] = {
+                "prompt_id": "cp-1", "round_type": "caption",
+                "player_ids": [], "submissions": {}, "votes": {}, "score_deltas": {},
+            }
+        mock_io = _mock_socketio()
+        with patch("game._start_timer", return_value=MagicMock()):
+            game.advance_state(code, mock_io)
+        assert rooms[code]["timer_total"] == expected_total, (
+            f"advancing from {state}: timer_total was {rooms[code]['timer_total']}"
+        )
+
+
+def test_advance_state_caption_scores_clears_timer_total():
+    code, _ = _room_in_submitting()
+    rooms[code]["state"] = "caption_scores"
+    mock_io = _mock_socketio()
+    with patch("game._start_timer", return_value=MagicMock()):
+        game.advance_state(code, mock_io)
+    assert rooms[code]["timer_total"] is None
+
+
+def test_extend_timer_grows_timer_total():
+    code, _ = _room_in_submitting()
+    rooms[code]["timer_total"] = game.SUBMIT_TIMEOUT
+    mock_io = _mock_socketio()
+    with patch("game._start_timer", return_value=MagicMock()):
+        game.extend_timer(code, mock_io)
+        game.extend_timer(code, mock_io)
+    assert rooms[code]["timer_total"] == game.SUBMIT_TIMEOUT + 2 * game.EXTEND_AMOUNT
+
+
+# ---------------------------------------------------------------------------
+# Pair history — exhaust all matchup combinations before recycling
+# ---------------------------------------------------------------------------
+
+def _pair_id_counts(prompts):
+    """{player_id: number of prompts they appear in} for a round's prompts."""
+    counts = {}
+    for prompt in prompts:
+        for pid in prompt["player_ids"]:
+            counts[pid] = counts.get(pid, 0) + 1
+    return counts
+
+
+def _combos(prompts):
+    """The set of unordered matchups used in a round's prompts."""
+    return {frozenset(p["player_ids"]) for p in prompts}
+
+
+def test_make_pairs_default_cost_keeps_invariants():
+    """Without a cost function the reworked algorithm keeps the old contract."""
+    for n in range(2, 9):
+        for seed in range(20):
+            random.seed(seed)
+            pairs = game._make_pairs(n)
+            assert len(pairs) == -(-n * game.PROMPTS_PER_PLAYER // 2)
+            counts = [0] * n
+            for i, j in pairs:
+                assert i != j
+                counts[i] += 1
+                counts[j] += 1
+            for c in counts:
+                assert game.PROMPTS_PER_PLAYER <= c <= game.PROMPTS_PER_PLAYER + 1
+
+
+def test_make_pairs_no_duplicate_pair_within_round():
+    """The same two players never face each other twice in one round (n >= 3)."""
+    for n in (3, 4, 5, 6):
+        for seed in range(100):
+            random.seed(seed)
+            pairs = game._make_pairs(n)
+            combos = [frozenset(p) for p in pairs]
+            assert len(set(combos)) == len(combos), (
+                f"n={n} seed={seed}: duplicate matchup within a single round: {pairs}"
+            )
+
+
+def test_make_pairs_prefers_unused_combos():
+    """With history marking some combos as used, only fresh combos are chosen
+    whenever a fresh full selection exists (n=4: {0,1},{2,3} used → the four
+    remaining combos are exactly a valid selection)."""
+    used = {frozenset((0, 1)), frozenset((2, 3))}
+    cost = lambda i, j: 1 if frozenset((i, j)) in used else 0
+    for seed in range(50):
+        random.seed(seed)
+        pairs = game._make_pairs(4, cost)
+        for p in pairs:
+            assert frozenset(p) not in used, f"seed={seed}: reused {p} of {pairs}"
+
+
+def test_assign_prompts_records_pair_history():
+    players = _make_player_dicts(4)
+    history = {}
+    prompts = game.assign_prompts(players, history)
+    assert sum(history.values()) == len(prompts)
+    valid_ids = {p["id"] for p in players}
+    for key in history:
+        assert isinstance(key, frozenset) and len(key) == 2
+        assert key <= valid_ids
+
+
+def test_assign_prompts_no_repeat_matchups_across_rounds_n5():
+    """5 players have C(5,2)=10 combos and use 5 per round — two rounds must
+    exhaust all 10 with no repeats."""
+    players = _make_player_dicts(5)
+    for seed in range(50):
+        random.seed(seed)
+        history = {}
+        game.assign_prompts(players, history)
+        game.assign_prompts(players, history)
+        assert len(history) == 10, f"seed={seed}: {sorted(history.values())}"
+        assert all(count == 1 for count in history.values()), (
+            f"seed={seed}: repeated a matchup while unused ones remained: {history}"
+        )
+
+
+def test_assign_prompts_n4_two_rounds_cover_all_combos():
+    """4 players use 4 of 6 combos per round; after two rounds (8 slots) every
+    combo must have been used, with none used more than twice."""
+    players = _make_player_dicts(4)
+    for seed in range(50):
+        random.seed(seed)
+        history = {}
+        game.assign_prompts(players, history)
+        game.assign_prompts(players, history)
+        assert len(history) == 6, f"seed={seed}: only {len(history)} combos used"
+        assert max(history.values()) <= 2, f"seed={seed}: {history}"
+
+
+def test_assign_prompts_n3_recycles_evenly():
+    """3 players only have 3 combos and need all of them every round, so
+    recycling is expected — but usage must stay perfectly even."""
+    players = _make_player_dicts(3)
+    history = {}
+    for round_number in (1, 2, 3):
+        game.assign_prompts(players, history)
+        assert len(history) == 3
+        assert all(count == round_number for count in history.values())
+
+
+def test_assign_prompts_n2_recycles_immediately():
+    """2 players have a single possible matchup; it must recycle without issue."""
+    players = _make_player_dicts(2)
+    history = {}
+    game.assign_prompts(players, history)
+    assert list(history.values()) == [game.PROMPTS_PER_PLAYER]
+    game.assign_prompts(players, history)
+    assert list(history.values()) == [2 * game.PROMPTS_PER_PLAYER]
+
+
+def test_assign_prompts_invariant_holds_with_seeded_history():
+    """Prompt-count fairness never bends to the history preference."""
+    for n in range(2, 9):
+        players = _make_player_dicts(n)
+        ids = [p["id"] for p in players]
+        for seed in range(20):
+            random.seed(seed)
+            history = {}
+            for a in range(n):
+                for b in range(a + 1, n):
+                    if random.random() < 0.5:
+                        history[frozenset((ids[a], ids[b]))] = random.randint(1, 3)
+            prompts = game.assign_prompts(players, history)
+            counts = _pair_id_counts(prompts)
+            for pid in ids:
+                assert game.PROMPTS_PER_PLAYER <= counts[pid] <= game.PROMPTS_PER_PLAYER + 1
+
+
+def test_assign_prompts_handles_player_churn():
+    """A player leaving and another joining between rounds must not break
+    pairing — old ids stay in history untouched, new ids start fresh."""
+    round1_players = _make_player_dicts(4)          # p1..p4
+    history = {}
+    game.assign_prompts(round1_players, history)
+    p4_keys = {k: v for k, v in history.items() if "p4" in k}
+
+    newcomer = dict(round1_players[0], id="p9", name="Player9")
+    round2_players = round1_players[:3] + [newcomer]  # p4 left, p9 joined
+    prompts = game.assign_prompts(round2_players, history)
+
+    counts = _pair_id_counts(prompts)
+    for pid in ("p1", "p2", "p3", "p9"):
+        assert game.PROMPTS_PER_PLAYER <= counts[pid] <= game.PROMPTS_PER_PLAYER + 1
+    assert "p4" not in counts
+    for key, value in p4_keys.items():
+        assert history[key] == value
+
+
+def test_start_game_seeds_pair_history():
+    code, _ = _room_with_n_players(4)
+    mock_io = _mock_socketio()
+    with patch("game._start_timer", return_value=MagicMock()):
+        game.start_game(code, mock_io)
+    history = rooms[code]["pair_history"]
+    assert sum(history.values()) == len(rooms[code]["prompts"])
+
+
+def test_round_intro_avoids_round_one_matchups():
+    """Round 2's assignments extend the same pair_history, so with 4 players
+    both never-used combos appear and no combo exceeds two uses overall."""
+    for seed in range(20):
+        rooms.clear()
+        random.seed(seed)
+        code, _ = _room_with_n_players(4)
+        mock_io = _mock_socketio()
+        with patch("game._start_timer", return_value=MagicMock()):
+            game.start_game(code, mock_io)
+            round1 = _combos(rooms[code]["prompts"])
+            rooms[code]["state"] = "round_intro"
+            rooms[code]["round"] = 2
+            game.advance_state(code, mock_io)
+        history = rooms[code]["pair_history"]
+        assert sum(history.values()) == 8
+        assert len(history) == 6, (
+            f"seed={seed}: round 2 repeated matchups instead of using fresh "
+            f"ones (round 1: {sorted(map(sorted, round1))})"
+        )
+        assert max(history.values()) <= 2

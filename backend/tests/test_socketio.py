@@ -1138,3 +1138,19 @@ def test_extend_timer_player_not_in_room_emits_error(client):
     client.emit("host:extend_timer", {"room_code": code})
     received = client.get_received()
     assert "error" in _received_names(received)
+
+
+def test_game_state_broadcast_includes_server_now_and_timer_total(client):
+    """Every game:state broadcast carries the server clock and phase duration
+    so clients can render skew-free countdowns."""
+    import time
+    import game
+    code = room_store.create_room()["code"]
+    _join_and_become_host(client, code)
+    _add_player_direct(code, "p2", "Bob")
+    with patch("game._start_timer", return_value=MagicMock()):
+        client.emit("host:start", {"room_code": code})
+        received = client.get_received()
+    state = _find_event(received, "game:state")["args"][0]
+    assert abs(state["server_now"] - time.time()) < 1.0
+    assert state["timer_total"] == game.SUBMIT_TIMEOUT

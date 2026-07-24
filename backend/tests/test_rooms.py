@@ -1,6 +1,7 @@
 import pytest
 import sys
 import os
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
@@ -708,3 +709,49 @@ def test_add_caption_vote_fails_when_caption_prompt_is_none():
     rooms[code]["state"] = "caption_voting"
     rooms[code]["caption_prompt"] = None
     assert room_store.add_caption_vote(code, "p1", "p2") is False
+
+
+# ---------------------------------------------------------------------------
+# server_now / timer_total / pair_history
+# ---------------------------------------------------------------------------
+
+def test_get_room_state_includes_server_now():
+    """Clients sync their countdowns to the server clock via server_now."""
+    room = room_store.create_room()
+    state = room_store.get_room_state(room["code"])
+    assert abs(state["server_now"] - time.time()) < 1.0
+
+
+def test_get_room_state_includes_timer_total():
+    room = room_store.create_room()
+    code = room["code"]
+    state = room_store.get_room_state(code)
+    assert state["timer_total"] is None  # no timer running in lobby
+    rooms[code]["timer_total"] = 120
+    assert room_store.get_room_state(code)["timer_total"] == 120
+
+
+def test_get_room_state_excludes_pair_history():
+    """pair_history has frozenset keys — it must never enter the JSON payload."""
+    room = room_store.create_room()
+    rooms[room["code"]]["pair_history"] = {frozenset(("p1", "p2")): 1}
+    assert "pair_history" not in room_store.get_room_state(room["code"])
+
+
+def test_create_room_initializes_pair_history():
+    room = room_store.create_room()
+    assert rooms[room["code"]]["pair_history"] == {}
+
+
+def test_reset_room_clears_timer_total():
+    code = _room_with_final_state()
+    rooms[code]["timer_total"] = 120
+    room_store.reset_room(code)
+    assert rooms[code]["timer_total"] is None
+
+
+def test_reset_room_clears_pair_history():
+    code = _room_with_final_state()
+    rooms[code]["pair_history"] = {frozenset(("p1", "p2")): 2}
+    room_store.reset_room(code)
+    assert rooms[code]["pair_history"] == {}
