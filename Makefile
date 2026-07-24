@@ -114,7 +114,7 @@ build-backend: build-frontend
 
 # 3. Package the Electron wrapper + backend bundle into a platform installer.
 #    Output:  dist/Photoful-<ver>.dmg / .zip        (macOS)
-#             dist/Photoful Setup <ver>.exe / .zip  (Windows)
+#             dist/Photoful-Setup-<ver>.exe / .zip  (Windows, one-click NSIS)
 #             dist/Photoful-<ver>.AppImage / .tar.gz (Linux)
 #    The unpacked builds (dist/mac*, dist/win-unpacked, dist/linux-unpacked)
 #    are what you upload to Steam depots.

@@ -40,6 +40,14 @@
         "zip"
       ]
     },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "runAfterFinish": true,
+      "artifactName": "Photoful-Setup-${version}.${ext}"
+    },
     "linux": {
       "target": [
         "AppImage",

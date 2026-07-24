@@ -198,8 +198,20 @@ Note: uploads in the packaged build go to the user-data directory (e.g. `~/Libra
 | Platform | Installer | Steam depot (unpacked) |
 |---|---|---|
 | macOS | `dist/Photoful-<ver>.dmg` / `.zip` | `dist/mac*/Photoful.app` |
-| Windows | `dist/Photoful Setup <ver>.exe` / `.zip` | `dist/win-unpacked/` |
+| Windows | `dist/Photoful-Setup-<ver>.exe` / `.zip` | `dist/win-unpacked/` |
 | Linux | `dist/Photoful-<ver>.AppImage` / `.tar.gz` | `dist/linux-unpacked/` |
+
+The Windows installer is a **one-click NSIS installer**: double-click, it installs
+per-user (no admin/UAC prompt), creates desktop + Start Menu shortcuts, and
+launches the game when it finishes. Uninstall works normally from Windows
+"Add or remove programs". Two first-run notes for unsigned builds distributed
+outside Steam:
+
+- **SmartScreen** may show "Windows protected your PC" — click *More info →
+  Run anyway* (goes away once the installer is Authenticode-signed).
+- **Windows Firewall** will ask to allow the game server on first launch —
+  players' phones can't join over LAN until access is allowed for
+  *Private networks*.
 
 ### Incremental build
 
