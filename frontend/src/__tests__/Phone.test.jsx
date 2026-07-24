@@ -1200,6 +1200,28 @@ describe("Phone caption round screens", () => {
     expect(screen.queryByText(/Alice caption/)).not.toBeInTheDocument();
   });
 
+  it("caption_voting keeps captions anonymous — no author names on vote cards", async () => {
+    await joinPhone("p1");
+    const promptWithSubs = {
+      ...captionPrompt,
+      submissions: {
+        "p1": { caption: "Alice caption" },
+        "p2": { caption: "Bob caption" },
+      },
+    };
+    vi.useFakeTimers();
+    act(() => emit("game:state", {
+      state: "caption_voting", round: 2,
+      caption_prompt: promptWithSubs,
+      players, prompts: [], current_prompt: null, timer_end: null,
+    }));
+    act(() => { vi.advanceTimersByTime(3500); });
+    vi.useRealTimers();
+    expect(screen.getByText(/Bob caption/)).toBeInTheDocument();
+    // The author's name must not be revealed while voting is open
+    expect(screen.queryByText("Bob")).not.toBeInTheDocument();
+  });
+
   it("caption_voting shows waiting after voting", async () => {
     await joinPhone("p1");
     const promptWithSubs = {
@@ -1261,5 +1283,54 @@ describe("Phone photo display — no cropping", () => {
     const imgs = screen.getAllByRole("img");
     expect(imgs.length).toBeGreaterThan(0);
     imgs.forEach(img => expect(img.style.objectFit).toBe("contain"));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Countdown clock sync — the server clock is the single source of truth
+// ---------------------------------------------------------------------------
+
+describe("Phone countdown clock sync", () => {
+  async function joinAndEmitSkewedSubmitting(skewSeconds) {
+    renderPhone("ABCD");
+    await userEvent.type(screen.getByPlaceholderText(/your name/i), "Carol");
+    await userEvent.click(screen.getByRole("button", { name: /join game/i }));
+    act(() => emit("player:self", { player_id: "p3", role: "player" }));
+
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T12:00:00Z"));
+    const serverNow = Date.now() / 1000 - skewSeconds;
+    act(() => emit("game:state", {
+      state: "submitting",
+      server_now: serverNow,
+      timer_end:  serverNow + 120,
+      timer_total: 120,
+      prompts: [{
+        prompt_id:   "pid-1",
+        prompt_text: "Show us your pet",
+        player_ids:  ["p1", "p2"],
+        submissions: {},
+        votes:       {},
+      }],
+      players: [
+        { id: "p1", name: "Alice", role: "player", avatar_color: "#FF6B6B" },
+        { id: "p2", name: "Bob",   role: "player", avatar_color: "#4ECDC4" },
+        { id: "p3", name: "Carol", role: "player", avatar_color: "#FFE66D" },
+      ],
+    }));
+    vi.useRealTimers();
+  }
+
+  it("countdown tracks the server clock when the phone clock runs ahead", async () => {
+    // Phone clock 200s ahead of the server: naive subtraction would clamp the
+    // freshly-started 120s phase to a constant "0s" (the final-round bug).
+    await joinAndEmitSkewedSubmitting(200);
+    expect(screen.getByText("120s")).toBeInTheDocument();
+    expect(screen.queryByText("0s")).not.toBeInTheDocument();
+  });
+
+  it("countdown tracks the server clock when the phone clock runs behind", async () => {
+    await joinAndEmitSkewedSubmitting(-200);
+    expect(screen.getByText("120s")).toBeInTheDocument();
   });
 });

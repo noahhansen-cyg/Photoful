@@ -933,7 +933,7 @@ describe("Caption Voting screen", () => {
     expect(screen.getByText(/Bob's funny caption/)).toBeInTheDocument();
   });
 
-  it("renders vote counts", async () => {
+  it("keeps voting anonymous — no author names or live vote counts", async () => {
     vi.useFakeTimers();
     const votedPrompt = { ...captionPrompt, votes: { "voter": "1" } };
     renderTV();
@@ -945,7 +945,11 @@ describe("Caption Voting screen", () => {
     }));
     act(() => vi.advanceTimersByTime(3500));
     vi.useRealTimers();
-    expect(screen.getByText(/1 vote$/)).toBeInTheDocument();
+    expect(screen.getByText(/Alice's funny caption/)).toBeInTheDocument();
+    expect(screen.getByText(/Bob's funny caption/)).toBeInTheDocument();
+    expect(screen.queryByText("Alice")).not.toBeInTheDocument();
+    expect(screen.queryByText("Bob")).not.toBeInTheDocument();
+    expect(screen.queryByText(/\d+ votes?$/)).not.toBeInTheDocument();
   });
 });
 
@@ -1102,5 +1106,77 @@ describe("TV photo display — no cropping", () => {
     }));
     const img = screen.getByRole("img", { name: /featured/i });
     expect(img.style.objectFit).toBe("contain");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Countdown clock sync — the server clock is the single source of truth
+// ---------------------------------------------------------------------------
+
+describe("TV countdown clock sync", () => {
+  const captionPrompt = {
+    prompt_id:            "cp-1",
+    round_type:           "caption",
+    featured_image_url:   "/uploads/ABCD/featured.jpg",
+    featured_player_id:   "1",
+    featured_prompt_text: "Funniest pet photo",
+    player_ids:           ["1", "2"],
+    submissions:          { "1": { caption: "test" } },
+    votes:                {},
+    score_deltas:         {},
+  };
+
+  function emitWithSkew(extra, { skewSeconds, duration }) {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T12:00:00Z"));
+    // A positive skew means this device's clock runs ahead of the server's.
+    const serverNow = Date.now() / 1000 - skewSeconds;
+    renderTV();
+    act(() => emit("game:state", {
+      round: 1,
+      server_now: serverNow,
+      timer_end:  serverNow + duration,
+      timer_total: duration,
+      players: [], prompts: [], current_prompt: null,
+      ...extra,
+    }));
+    vi.useRealTimers();
+  }
+
+  it("submitting countdown tracks the server clock despite local skew", () => {
+    // Naive subtraction with a 200s-ahead clock would clamp a fresh 120s
+    // phase straight to "0s" for its entire duration.
+    emitWithSkew({ state: "submitting" }, { skewSeconds: 200, duration: 120 });
+    expect(screen.getByText("120s")).toBeInTheDocument();
+    expect(screen.queryByText("0s")).not.toBeInTheDocument();
+  });
+
+  it("caption_voting countdown never pins at 0s under clock skew", () => {
+    // The final-round regression: short 30s phases are the most skew-sensitive.
+    emitWithSkew(
+      { state: "caption_voting", round: 2, caption_prompt: captionPrompt },
+      { skewSeconds: 200, duration: 30 }
+    );
+    expect(screen.getByText("30s")).toBeInTheDocument();
+    expect(screen.queryByText("0s")).not.toBeInTheDocument();
+  });
+
+  it("TimerBar sizes its fill from the server-sent timer_total", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T12:00:00Z"));
+    const serverNow = Date.now() / 1000;
+    renderTV();
+    // An extended submission timer: 150s total with 75s remaining → 50% fill.
+    act(() => emit("game:state", {
+      state: "submitting", round: 1,
+      server_now: serverNow,
+      timer_end:  serverNow + 75,
+      timer_total: 150,
+      players: [], prompts: [], current_prompt: null,
+    }));
+    vi.useRealTimers();
+    expect(screen.getByText("75s")).toBeInTheDocument();
+    const fill = [...document.querySelectorAll("div")].find(d => d.style.width === "50%");
+    expect(fill).toBeTruthy();
   });
 });

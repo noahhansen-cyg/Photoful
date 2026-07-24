@@ -43,35 +43,67 @@ def load_prompts():
         return json.load(f)
 
 
-def _make_pairs(n):
+# Greedy pairing can corner itself (the last forced pair may be a repeat even
+# though a different pick order avoids one), so _make_pairs retries a handful
+# of randomized passes and keeps the best. Sizes are party-small, so this is cheap.
+_PAIRING_ATTEMPTS = 20
+
+
+def _make_pairs(n, cost=None):
     """
     Return a list of (i, j) index pairs so each index 0..n-1 appears in
     exactly PROMPTS_PER_PLAYER pairs.  For odd n, one index will appear in
     PROMPTS_PER_PLAYER+1 pairs (unavoidable — total slot count is odd).
 
-    Runs exactly ceil(n * PROMPTS_PER_PLAYER / 2) iterations, always pairing
-    the two players with the highest remaining need so no one is left short.
-    Ties are shuffled for opponent variety.
+    cost(i, j) is an order-independent count of how often the matchup was
+    already used in past rounds; pairs are chosen to first avoid repeats
+    within the round, then repeats of past rounds — so every combination
+    gets exhausted before any recycles. Equal-cost candidates are shuffled
+    for opponent variety.
     """
     if n < 2:
         return []
+    if cost is None:
+        cost = lambda i, j: 0
 
-    total = math.ceil(n * PROMPTS_PER_PLAYER / 2)
-    needs = [PROMPTS_PER_PLAYER] * n
-    pairs = []
+    best = best_score = None
+    for _ in range(_PAIRING_ATTEMPTS):
+        pairs  = _make_pairs_once(n, cost)
+        combos = [frozenset(p) for p in pairs]
+        score  = (len(combos) - len(set(combos)),        # matchups repeated this round
+                  sum(cost(i, j) for i, j in pairs))     # matchups recycled from past rounds
+        if best is None or score < best_score:
+            best, best_score = pairs, score
+        if best_score == (0, 0):
+            break
+    return best
+
+
+def _make_pairs_once(n, cost):
+    """One greedy pairing pass; see _make_pairs for the contract."""
+    total    = math.ceil(n * PROMPTS_PER_PLAYER / 2)
+    needs    = [PROMPTS_PER_PLAYER] * n
+    in_round = {}  # {frozenset({i, j}): times paired in this call}
+    pairs    = []
 
     for _ in range(total):
-        order    = sorted(range(n), key=lambda i: needs[i], reverse=True)
-        top_need = needs[order[0]]
-        top  = [i for i in order if needs[i] == top_need]
-        rest = [i for i in order if needs[i] < top_need]
-        random.shuffle(top)
+        top_need = max(needs)
+        top = [i for i in range(n) if needs[i] == top_need]
 
         if len(top) >= 2:
-            i, j = top[0], top[1]
+            candidates = [(top[a], top[b])
+                          for a in range(len(top)) for b in range(a + 1, len(top))]
         else:
-            i, j = top[0], rest[0]
+            i = top[0]
+            rest_need = max(needs[j] for j in range(n) if j != i)
+            candidates = [(i, j) for j in range(n)
+                          if j != i and needs[j] == rest_need]
 
+        random.shuffle(candidates)  # min() is stable, so ties break randomly
+        i, j = min(candidates,
+                   key=lambda p: (in_round.get(frozenset(p), 0), cost(*p)))
+
+        in_round[frozenset((i, j))] = in_round.get(frozenset((i, j)), 0) + 1
         pairs.append((i, j))
         needs[i] -= 1
         needs[j] -= 1
@@ -79,18 +111,31 @@ def _make_pairs(n):
     return pairs
 
 
-def assign_prompts(players):
+def assign_prompts(players, pair_history=None):
     """
     Given a list of player dicts, return a list of PromptAssignment dicts.
     Each prompt is assigned to exactly 2 players.  Every player appears in
     exactly PROMPTS_PER_PLAYER prompts (one player may get PROMPTS_PER_PLAYER+1
     when the player count is odd).
+
+    pair_history is {frozenset({id_a, id_b}): times matched}; it is read to
+    prefer never-before-seen matchups and updated in place with the pairs
+    chosen here, so passing the room's dict makes history persist across
+    rounds. (A,B) and (B,A) count as the same matchup.
     """
     shuffled = players[:]
     random.shuffle(shuffled)
+    ids = [p["id"] for p in shuffled]
 
-    pairs        = _make_pairs(len(shuffled))
+    history = pair_history if pair_history is not None else {}
+    cost    = lambda i, j: history.get(frozenset((ids[i], ids[j])), 0)
+
+    pairs        = _make_pairs(len(ids), cost)
     prompt_texts = random.sample(load_prompts(), len(pairs))
+
+    for i, j in pairs:
+        key = frozenset((ids[i], ids[j]))
+        history[key] = history.get(key, 0) + 1
 
     return [
         {
@@ -262,6 +307,7 @@ def _advance_state(room_code, socketio):
         room["current_prompt_idx"] = 0
         room["state"]    = "voting_intro"
         room["timer_end"] = time.time() + VOTING_INTRO_TIMEOUT
+        room["timer_total"] = VOTING_INTRO_TIMEOUT
         room["timer"] = _start_timer(
             room_code, VOTING_INTRO_TIMEOUT, lambda: advance_state(room_code, socketio), socketio
         )
@@ -269,6 +315,7 @@ def _advance_state(room_code, socketio):
     elif state == "voting_intro":
         room["state"]    = "voting"
         room["timer_end"] = time.time() + VOTE_TIMEOUT
+        room["timer_total"] = VOTE_TIMEOUT
         room["timer"] = _start_timer(
             room_code, VOTE_TIMEOUT, lambda: advance_state(room_code, socketio), socketio
         )
@@ -279,6 +326,7 @@ def _advance_state(room_code, socketio):
             prompt["score_deltas"] = score_deltas
         room["state"]    = "scores"
         room["timer_end"] = time.time() + SCORES_TIMEOUT
+        room["timer_total"] = SCORES_TIMEOUT
         room["timer"] = _start_timer(
             room_code, SCORES_TIMEOUT, lambda: advance_state(room_code, socketio), socketio
         )
@@ -290,6 +338,7 @@ def _advance_state(room_code, socketio):
             room["current_prompt_idx"] = next_idx
             room["state"]    = "voting"
             room["timer_end"] = time.time() + VOTE_TIMEOUT
+            room["timer_total"] = VOTE_TIMEOUT
             room["timer"] = _start_timer(
                 room_code, VOTE_TIMEOUT, lambda: advance_state(room_code, socketio), socketio
             )
@@ -301,6 +350,7 @@ def _advance_state(room_code, socketio):
                 p["score_deltas"] = {}
             room["state"]    = "round_intro"
             room["timer_end"] = time.time() + ROUND_INTRO_TIMEOUT
+            room["timer_total"] = ROUND_INTRO_TIMEOUT
             room["timer"] = _start_timer(
                 room_code, ROUND_INTRO_TIMEOUT, lambda: advance_state(room_code, socketio), socketio
             )
@@ -315,22 +365,25 @@ def _advance_state(room_code, socketio):
                 room["caption_prompt"] = create_caption_prompt(players, best)
                 room["state"]    = "caption_intro"
                 room["timer_end"] = time.time() + CAPTION_INTRO_TIMEOUT
+                room["timer_total"] = CAPTION_INTRO_TIMEOUT
                 room["timer"] = _start_timer(
                     room_code, CAPTION_INTRO_TIMEOUT, lambda: advance_state(room_code, socketio), socketio
                 )
             else:
                 room["state"]    = "final"
                 room["timer_end"] = None
+                room["timer_total"] = None
 
     elif state == "round_intro":
         # Intro timer fired — assign fresh prompts and start a new submission phase.
         # Disconnected players are still assigned prompts so they stay in the game.
         players = [p for p in room["players"]
                    if p["role"] in ("player", "host")]
-        room["prompts"]            = assign_prompts(players)
+        room["prompts"]            = assign_prompts(players, room.setdefault("pair_history", {}))
         room["current_prompt_idx"] = 0
         room["state"]    = "submitting"
         room["timer_end"] = time.time() + SUBMIT_TIMEOUT
+        room["timer_total"] = SUBMIT_TIMEOUT
         room["timer"] = _start_timer(
             room_code, SUBMIT_TIMEOUT, lambda: advance_state(room_code, socketio), socketio
         )
@@ -338,6 +391,7 @@ def _advance_state(room_code, socketio):
     elif state == "caption_intro":
         room["state"]    = "captioning"
         room["timer_end"] = time.time() + CAPTION_TIMEOUT
+        room["timer_total"] = CAPTION_TIMEOUT
         room["timer"] = _start_timer(
             room_code, CAPTION_TIMEOUT, lambda: advance_state(room_code, socketio), socketio
         )
@@ -345,6 +399,7 @@ def _advance_state(room_code, socketio):
     elif state == "captioning":
         room["state"]    = "caption_voting"
         room["timer_end"] = time.time() + VOTE_TIMEOUT
+        room["timer_total"] = VOTE_TIMEOUT
         room["timer"] = _start_timer(
             room_code, VOTE_TIMEOUT, lambda: advance_state(room_code, socketio), socketio
         )
@@ -359,6 +414,7 @@ def _advance_state(room_code, socketio):
                 player["score"] = player.get("score", 0) + deltas.get(player["id"], 0)
         room["state"]    = "caption_scores"
         room["timer_end"] = time.time() + SCORES_TIMEOUT
+        room["timer_total"] = SCORES_TIMEOUT
         room["timer"] = _start_timer(
             room_code, SCORES_TIMEOUT, lambda: advance_state(room_code, socketio), socketio
         )
@@ -366,6 +422,7 @@ def _advance_state(room_code, socketio):
     elif state == "caption_scores":
         room["state"]    = "final"
         room["timer_end"] = None
+        room["timer_total"] = None
 
     socketio.emit("game:state", room_store.get_room_state(room_code), to=room_code)
 
@@ -384,10 +441,11 @@ def start_game(room_code, socketio):
         if len(players) < 2:
             return False
 
-        room["prompts"]             = assign_prompts(players)
+        room["prompts"]             = assign_prompts(players, room.setdefault("pair_history", {}))
         room["current_prompt_idx"]  = 0
         room["state"]               = "submitting"
         room["timer_end"]           = time.time() + SUBMIT_TIMEOUT
+        room["timer_total"]         = SUBMIT_TIMEOUT
         room["timer"]               = _start_timer(
             room_code, SUBMIT_TIMEOUT, lambda: advance_state(room_code, socketio), socketio
         )
@@ -409,6 +467,7 @@ def extend_timer(room_code, socketio):
         remaining  = max(0.0, (room.get("timer_end") or 0.0) - time.time())
         new_delay  = remaining + EXTEND_AMOUNT
         room["timer_end"] = time.time() + new_delay
+        room["timer_total"] = (room.get("timer_total") or SUBMIT_TIMEOUT) + EXTEND_AMOUNT
         room["timer"]     = _start_timer(
             room_code, new_delay, lambda: advance_state(room_code, socketio), socketio
         )

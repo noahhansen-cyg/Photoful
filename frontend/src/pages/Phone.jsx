@@ -25,6 +25,9 @@ export default function Phone() {
   const [error, setError]           = useState("");
   const [timeLeft, setTimeLeft]     = useState(null);
   const timerRef                    = useRef(null);
+  // Difference between the server's clock and this device's clock, refreshed
+  // on every game:state so countdowns track the server regardless of local skew.
+  const clockOffsetRef              = useRef(0);
   // Keep role in a ref so reconnect handler always uses the current value
   // (the useEffect closure would otherwise capture the stale "player" role
   // if the player later claims host).
@@ -50,7 +53,12 @@ export default function Phone() {
       roleRef.current = role;
       localStorage.setItem(`pq_session_${code}`, JSON.stringify({ name, myPlayerId: player_id, myRole: role }));
     });
-    socket.on("game:state", setGameState);
+    socket.on("game:state", (state) => {
+      if (typeof state?.server_now === "number") {
+        clockOffsetRef.current = state.server_now - Date.now() / 1000;
+      }
+      setGameState(state);
+    });
     socket.on("error", ({ message }) => {
       setError(message);
       // If we auto-joined from a saved session and got an error before receiving
@@ -81,7 +89,7 @@ export default function Phone() {
     clearInterval(timerRef.current);
     if (!gameState?.timer_end) { setTimeLeft(null); return; }
     const tick = () => {
-      const secs = Math.max(0, Math.round(gameState.timer_end - Date.now() / 1000));
+      const secs = Math.max(0, Math.round(gameState.timer_end - (Date.now() / 1000 + clockOffsetRef.current)));
       setTimeLeft(secs);
     };
     tick();
@@ -144,7 +152,7 @@ export default function Phone() {
       {state === "round_intro"    && <RoundIntroScreen round={gameState?.round ?? 2} />}
       {state === "caption_intro"  && <CaptionIntroScreen />}
       {state === "captioning"     && <CaptionSubmitScreen gameState={gameState} myPlayerId={myPlayerId} code={code} />}
-      {state === "caption_voting" && <CaptionVoteScreen gameState={gameState} myPlayerId={myPlayerId} code={code} players={players} />}
+      {state === "caption_voting" && <CaptionVoteScreen gameState={gameState} myPlayerId={myPlayerId} code={code} />}
       {state === "caption_scores" && <div style={styles.section}><p style={styles.hint}>Caption scores — get ready for the final!</p></div>}
       {state === "final"          && <FinalScreen players={players} myPlayerId={myPlayerId} myRole={myRole} code={code} />}
     </div>
@@ -562,7 +570,9 @@ function CaptionSubmitScreen({ gameState, myPlayerId, code }) {
 // Caption Vote
 // ---------------------------------------------------------------------------
 
-function CaptionVoteScreen({ gameState, myPlayerId, code, players }) {
+// Captions are shown without author names so votes stay unbiased; authors are
+// revealed on the big screen once scores come up.
+function CaptionVoteScreen({ gameState, myPlayerId, code }) {
   const cp = gameState?.caption_prompt;
   const [voted, setVoted] = useState(false);
   const alreadyVoted = cp?.votes?.[myPlayerId];
@@ -607,7 +617,6 @@ function CaptionVoteScreen({ gameState, myPlayerId, code, players }) {
 
   const submissions = cp?.submissions ?? {};
   const playerIds   = cp?.player_ids ?? [];
-  const getPlayer   = (id) => players.find(p => p.id === id);
 
   const others = playerIds.filter(pid => pid !== myPlayerId);
 
@@ -621,12 +630,10 @@ function CaptionVoteScreen({ gameState, myPlayerId, code, players }) {
       <p style={styles.label}>Vote for your favourite!</p>
       <div style={styles.voteOptions}>
         {others.map(pid => {
-          const sub    = submissions[pid];
-          const player = getPlayer(pid);
+          const sub = submissions[pid];
           if (!sub) return null;
           return (
             <button key={pid} style={styles.voteCard} onClick={() => castVote(pid)}>
-              <div style={{ ...styles.voteName(player?.avatar_color), fontSize: "1rem" }}>{player?.name}</div>
               <div style={{ fontSize: "1.1rem", fontStyle: "italic", textAlign: "center" }}>"{sub.caption}"</div>
             </button>
           );
